@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  GoogleGenAI,
+  Modality,
+  type LiveServerMessage,
+} from '@google/genai';
 import type {
   CompanionCareState,
   ContinuousSessionState,
@@ -11,13 +16,25 @@ import type {
   MemoryItem,
   Persona,
   TranscriptMessage,
+  VoiceName,
   WeatherSnapshot,
 } from '../types/gwen';
 import {
   getActiveGeminiApiKey,
-  getGeminiRequestHeaders,
   subscribeApiKeyChanges,
 } from '../services/apiKeyStorage';
+import {
+  ALLOWED_VOICES,
+  GwenClientApiError,
+  LIVE_FUNCTION_DECLARATIONS,
+  checkGwenEmpathyCue,
+  discoverBidiModels,
+  extractRawErrorMessage,
+  generateGwenTts,
+  toFriendlyGeminiError,
+  transcribeGwenAudio,
+} from '../services/gwenClientApi';
+import { buildGwenSystemInstruction } from '../shared/gwenSystemPrompt';
 import {
   computeSpectralSignature,
   cosineSimilarity,
@@ -243,7 +260,8 @@ export function useGwenLive({
   const [liveDraftInput, setLiveDraftInput] = useState('');
   const [liveDraftOutput, setLiveDraftOutput] = useState('');
 
-  const wsRef = useRef<WebSocket | null>(null);
+  const liveSessionRef = useRef<Awaited<ReturnType<GoogleGenAI['live']['connect']>> | null>(null);
+  const liveSessionOpenRef = useRef<boolean>(false);
   const userInitiatedStopRef = useRef<boolean>(false);
   const receivedServerErrorRef = useRef<boolean>(false);
   const inputCtxRef = useRef<AudioContext | null>(null);
@@ -405,25 +423,13 @@ export function useGwenLive({
       if (Date.now() - lastCameraEmpathyAtRef.current < 26000) return;
 
       try {
-        const res = await fetch('/api/gwen/empathy-check', {
-          method: 'POST',
-          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            cameraFrameBase64: frame,
-            userName:
-              settingsRef.current.deviceUserName ||
-              identityCoreRef.current.nickname ||
-              identityCoreRef.current.displayName,
-          }),
-        });
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          condition?: EmpathySignal['condition'];
-          confidence?: number;
-          summary?: string;
-          suggestedResponse?: string;
-        };
-        if (!data.condition) return;
+        const data = await checkGwenEmpathyCue(
+          frame,
+          settingsRef.current.deviceUserName ||
+            identityCoreRef.current.nickname ||
+            identityCoreRef.current.displayName
+        );
+        if (!data?.condition) return;
 
         const signal: EmpathySignal = {
           source: 'camera',
@@ -536,7 +542,7 @@ export function useGwenLive({
     activeSourcesRef.current.add(source);
     source.onended = () => {
       activeSourcesRef.current.delete(source);
-      if (activeSourcesRef.current.size === 0 && wsRef.current?.readyState === WebSocket.OPEN) {
+      if (activeSourcesRef.current.size === 0 && liveSessionOpenRef.current) {
         setGwenState('listening');
         setAudioLevel(0.04);
       }
@@ -652,20 +658,14 @@ export function useGwenLive({
         micStreamRef.current.getTracks().forEach((t) => t.stop());
         micStreamRef.current = null;
       }
-      if (wsRef.current) {
+      if (liveSessionRef.current) {
+        liveSessionOpenRef.current = false;
         try {
-          wsRef.current.onopen = null;
-          wsRef.current.onmessage = null;
-          wsRef.current.onerror = null;
-          wsRef.current.onclose = null;
-          if (wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: 'stop' }));
-          }
-          wsRef.current.close(1000, 'User ended session');
+          liveSessionRef.current.close();
         } catch {
           // Ignore close errors
         }
-        wsRef.current = null;
+        liveSessionRef.current = null;
       }
 
       setIsConnected(false);
@@ -755,19 +755,13 @@ export function useGwenLive({
         }
       }
 
-      // Secondary: Server Gemini TTS WAV if speechSynthesis is unavailable
+      // Secondary: Direct Browser Gemini TTS WAV if speechSynthesis is unavailable
       try {
-        const res = await fetch('/api/gwen/tts', {
-          method: 'POST',
-          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            text: cleaned,
-            voiceName: settingsRef.current.voiceName,
-            style: 'Warm, expressive natural voice',
-          }),
+        const data = await generateGwenTts({
+          text: cleaned,
+          voiceName: settingsRef.current.voiceName,
+          style: 'Warm, expressive natural voice',
         });
-        if (!res.ok) return;
-        const data = (await res.json()) as { audioBase64?: string };
         if (!data.audioBase64) return;
         await new Promise<void>((resolve) => {
           const audio = new Audio(`data:audio/wav;base64,${data.audioBase64}`);
@@ -793,23 +787,20 @@ export function useGwenLive({
     [stopLipSyncLoop]
   );
 
-  // Automatic Standard Voice Fallback Mode: SpeechRecognition (or MediaRecorder -> /api/gwen/transcribe) -> generateContent -> speechSynthesis + 3D lip-sync
+  // Automatic Standard Voice Fallback Mode: SpeechRecognition (or MediaRecorder -> direct Gemini transcribe) -> generateContent -> speechSynthesis + 3D lip-sync
   const activateStandardVoiceFallback = useCallback(
     async (liveFailureReason: string, closeCode?: number) => {
       if (userInitiatedStopRef.current) return;
 
-      // Close broken WebSocket cleanly without killing the mic stream
-      if (wsRef.current) {
+      // Close broken Live session cleanly without killing the mic stream
+      liveSessionOpenRef.current = false;
+      if (liveSessionRef.current) {
         try {
-          wsRef.current.onopen = null;
-          wsRef.current.onmessage = null;
-          wsRef.current.onerror = null;
-          wsRef.current.onclose = null;
-          wsRef.current.close();
+          liveSessionRef.current.close();
         } catch {
           // Ignore
         }
-        wsRef.current = null;
+        liveSessionRef.current = null;
       }
       teardownLiveAudioGraph();
       teardownStandardFallback();
@@ -1024,7 +1015,7 @@ export function useGwenLive({
         }
       };
 
-      // Secondary capture when browser lacks Web SpeechRecognition: MediaRecorder + silence VAD -> /api/gwen/transcribe
+      // Secondary capture when browser lacks Web SpeechRecognition: MediaRecorder + silence VAD -> direct browser Gemini transcribe
       const startMediaRecorderCycle = () => {
         if (
           !fallbackActiveRef.current ||
@@ -1066,31 +1057,11 @@ export function useGwenLive({
               setLiveDraftInput('Transcribing speech...');
               const audioBlob = new Blob(chunks, { type: mimeType });
               const base64 = await blobToBase64(audioBlob);
-              const res = await fetch('/api/gwen/transcribe', {
-                method: 'POST',
-                headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({
-                  audioBase64: base64,
-                  mimeType: mimeType.split(';')[0],
-                  languageHint: settingsRef.current.languageMode,
-                }),
+              const data = await transcribeGwenAudio({
+                audioBase64: base64,
+                mimeType: mimeType.split(';')[0],
+                languageHint: settingsRef.current.languageMode,
               });
-              const data = (await res.json()) as {
-                transcript?: string;
-                error?: string;
-                errorCode?: string;
-              };
-              if (!res.ok) {
-                if (data.errorCode === 'INVALID_KEY' || data.errorCode === 'QUOTA_EXCEEDED') {
-                  callbacksRef.current.onApiKeyError?.(
-                    data.errorCode,
-                    data.error || `HTTP ${res.status}`
-                  );
-                }
-                setLiveDraftInput('');
-                scheduleRecognitionStart();
-                return;
-              }
               const spoken = (data.transcript || '').trim();
               if (isMicTestingRef.current) {
                 if (spoken) {
@@ -1106,7 +1077,13 @@ export function useGwenLive({
                 setLiveDraftInput('');
                 scheduleRecognitionStart();
               }
-            } catch {
+            } catch (err) {
+              if (
+                err instanceof GwenClientApiError &&
+                (err.errorCode === 'INVALID_KEY' || err.errorCode === 'QUOTA_EXCEEDED')
+              ) {
+                callbacksRef.current.onApiKeyError?.(err.errorCode, err.message);
+              }
               setLiveDraftInput('');
               scheduleRecognitionStart();
             }
@@ -1191,7 +1168,7 @@ export function useGwenLive({
 
   // Shared PCM chunk handler for both Inline Blob AudioWorklet and ScriptProcessor fallback
   const handleMicPcmChunk = useCallback((channelData: Float32Array) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!liveSessionRef.current || !liveSessionOpenRef.current) return;
     const mode = settingsRef.current.voiceInputMode;
     const shouldTransmit =
       !isMicMutedRef.current && (mode === 'hands-free' || isPttPressedRef.current);
@@ -1269,7 +1246,13 @@ export function useGwenLive({
     }
 
     const base64 = floatTo16BitPCMBase64(channelData);
-    wsRef.current.send(JSON.stringify({ type: 'audio', audio: base64 }));
+    try {
+      liveSessionRef.current.sendRealtimeInput({
+        audio: { data: base64, mimeType: 'audio/pcm;rate=16000' },
+      });
+    } catch {
+      // Ignore send race during teardown
+    }
   }, []);
 
   const attachMicPipeline = useCallback(
@@ -1344,6 +1327,16 @@ export function useGwenLive({
 
     // Read & trim the latest personal Gemini API key dynamically from localStorage / Settings
     const latestApiKey = (getActiveGeminiApiKey() ?? '').trim();
+    if (!latestApiKey) {
+      const msg =
+        'No Gemini API key configured. Open Settings → Gemini API Key to add your personal Google AI Studio key.';
+      setError(msg);
+      setLiveDiagnostics(msg);
+      callbacksRef.current.onApiKeyError?.('INVALID_KEY', msg);
+      callbacksRef.current.onVoiceNotice?.(msg);
+      setGwenState('error');
+      return;
+    }
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -1381,174 +1374,345 @@ export function useGwenLive({
       }
       nextStartTimeRef.current = outputCtxRef.current.currentTime;
 
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${wsProtocol}//${window.location.host}/ws/live`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+      // Direct browser connection to Google Gemini Live WSS using the user's trimmed personal API key
+      const ai = new GoogleGenAI({
+        apiKey: latestApiKey,
+        apiVersion: 'v1beta',
+      });
 
-      ws.onopen = () => {
-        const trimmedKey = (latestApiKey || getActiveGeminiApiKey() || '').trim();
-        ws.send(
-          JSON.stringify({
-            type: 'init',
-            apiKey: trimmedKey || undefined,
-            voiceName: settingsRef.current.voiceName,
-            persona: activePersona,
-            languageMode: settingsRef.current.languageMode,
-            memories: settingsRef.current.incognitoMode ? [] : memories,
-            identityCore: settingsRef.current.incognitoMode
-              ? undefined
-              : identityCoreRef.current,
-            deviceUserName: settingsRef.current.deviceUserName,
-            timezone: settingsRef.current.timezone,
-            weather: weatherRef.current,
-            careState: careStateRef.current,
-            sessionState: settingsRef.current.incognitoMode
-              ? null
-              : sessionStateRef.current,
-            recentTurns: settingsRef.current.incognitoMode
-              ? []
-              : recentTurnsRef.current.slice(-10),
-            googleAccountEmail: googleEmailRef.current || null,
-            activeKidStudy: activeKidRef.current || null,
-            allKidNames: allKidNamesRef.current || [],
-            proactiveEmpathyEnabled: settingsRef.current.proactiveEmpathyEnabled,
-            incognitoMode: settingsRef.current.incognitoMode,
-            hasScreenShare:
-              isScreenSharingRef.current || Boolean(latestScreenFrameRef.current),
-            hasCameraVision: isCameraActiveRef.current,
-            faceRecognized: faceRecognizedRef.current,
-            voiceRecognized: voiceRecognizedRef.current,
-          })
-        );
-      };
+      const voiceName: VoiceName =
+        settingsRef.current.voiceName && ALLOWED_VOICES.has(settingsRef.current.voiceName)
+          ? settingsRef.current.voiceName
+          : 'Zephyr';
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data as string) as {
-            type: string;
-            data?: string;
-            text?: string;
-            message?: string;
-            code?: number;
-            reason?: string;
-            model?: string;
-            toolsEnabled?: boolean;
-            fallbackRecommended?: boolean;
-            errorCode?: 'INVALID_KEY' | 'QUOTA_EXCEEDED' | 'UNAVAILABLE';
-            calls?: LiveToolCall[];
+      const systemInstruction = buildGwenSystemInstruction({
+        persona: activePersona,
+        languageMode: settingsRef.current.languageMode,
+        memories: settingsRef.current.incognitoMode ? [] : memories,
+        identityCore: settingsRef.current.incognitoMode
+          ? undefined
+          : identityCoreRef.current,
+        deviceUserName: settingsRef.current.deviceUserName,
+        timezone: settingsRef.current.timezone,
+        weather: weatherRef.current,
+        careState: careStateRef.current,
+        sessionState: settingsRef.current.incognitoMode ? null : sessionStateRef.current,
+        recentTurns: settingsRef.current.incognitoMode
+          ? []
+          : recentTurnsRef.current.slice(-10),
+        googleAccountEmail: googleEmailRef.current || null,
+        activeKidStudy: activeKidRef.current || null,
+        allKidNames: allKidNamesRef.current || [],
+        proactiveEmpathyEnabled: settingsRef.current.proactiveEmpathyEnabled,
+        incognitoMode: settingsRef.current.incognitoMode,
+        isLiveVoice: true,
+        hasScreenShare:
+          isScreenSharingRef.current || Boolean(latestScreenFrameRef.current),
+        hasCameraVision: isCameraActiveRef.current,
+        faceRecognized: faceRecognizedRef.current,
+        voiceRecognized: voiceRecognizedRef.current,
+      });
+
+      const candidateModels = await discoverBidiModels(latestApiKey);
+      const primaryLiveModel = candidateModels[0] || 'gemini-3.8-live';
+
+      interface LiveAttemptSpec {
+        model: string;
+        label: string;
+        toolsEnabled: boolean;
+        config: Record<string, unknown>;
+      }
+
+      const attempts: LiveAttemptSpec[] = [
+        {
+          model: primaryLiveModel,
+          label: 'full',
+          toolsEnabled: true,
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+            },
+            systemInstruction,
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
+            tools: [{ functionDeclarations: LIVE_FUNCTION_DECLARATIONS }],
+          },
+        },
+        {
+          model: primaryLiveModel,
+          label: 'minimal-no-tools',
+          toolsEnabled: false,
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+            },
+            systemInstruction,
+          },
+        },
+        ...candidateModels.slice(1, 4).map((altModel) => ({
+          model: altModel,
+          label: 'fallback-model-minimal',
+          toolsEnabled: false,
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+            },
+            systemInstruction,
+          },
+        })),
+      ];
+
+      const tryConnectAttempt = (
+        spec: LiveAttemptSpec
+      ): Promise<{
+        session: Awaited<ReturnType<GoogleGenAI['live']['connect']>>;
+        model: string;
+        toolsEnabled: boolean;
+      }> => {
+        return new Promise((resolve, reject) => {
+          let settled = false;
+          let handshakeTimer: number | null = null;
+          let sessionRef: Awaited<ReturnType<GoogleGenAI['live']['connect']>> | null = null;
+
+          const finishReady = () => {
+            if (settled || !sessionRef) return;
+            settled = true;
+            if (handshakeTimer) window.clearTimeout(handshakeTimer);
+            resolve({
+              session: sessionRef,
+              model: spec.model,
+              toolsEnabled: spec.toolsEnabled,
+            });
           };
 
-          if (msg.type === 'ready') {
-            setVoiceTransportMode('live');
-            setActiveLiveModel(msg.model || 'gemini-3.8-live');
-            setIsConnected(true);
-            setGwenState('listening');
-            setError(null);
-            if (msg.model && msg.toolsEnabled === false) {
-              callbacksRef.current.onVoiceNotice?.(
-                `Connected Live Voice on ${msg.model} (minimal audio mode).`
-              );
+          const failHandshake = (code: number, reason: string) => {
+            if (settled) return;
+            settled = true;
+            if (handshakeTimer) window.clearTimeout(handshakeTimer);
+            try {
+              sessionRef?.close();
+            } catch {
+              // Ignore close race
             }
-            void attachMicPipeline(inputCtx, micStream);
-          } else if (msg.type === 'audio' && msg.data) {
-            schedulePcmPlayback(msg.data);
-          } else if (msg.type === 'interrupted') {
-            stopPlaybackQueue();
-            flushDraftTranscripts();
-            setGwenState('listening');
-          } else if (msg.type === 'input_transcript' && msg.text) {
-            draftInputRef.current += msg.text;
-            setLiveDraftInput(draftInputRef.current);
-          } else if (msg.type === 'output_transcript' && msg.text) {
-            if (draftInputRef.current.trim()) {
-              callbacksRef.current.onInputTranscript(draftInputRef.current.trim());
-              draftInputRef.current = '';
-              setLiveDraftInput('');
-            }
-            draftOutputRef.current += msg.text;
-            setLiveDraftOutput(draftOutputRef.current);
-          } else if (msg.type === 'turn_complete') {
-            flushDraftTranscripts();
-            if (activeSourcesRef.current.size === 0) {
-              setGwenState('listening');
-            }
-          } else if (msg.type === 'tool_call' && msg.calls) {
-            for (const call of msg.calls) {
-              callbacksRef.current.onToolCall(call);
-            }
-          } else if (msg.type === 'error') {
-            receivedServerErrorRef.current = true;
-            const detailCode =
-              typeof msg.code === 'number'
-                ? `code ${msg.code}${msg.reason ? `: ${msg.reason}` : ''}`
-                : msg.reason || '';
-            const fullErr =
-              msg.message ||
-              (detailCode
-                ? `Live Voice error (${detailCode})`
-                : 'Live Voice session encountered an error.');
+            reject({ code, reason, model: spec.model, label: spec.label });
+          };
 
-            setLiveDiagnostics(fullErr);
+          ai.live
+            .connect({
+              model: spec.model,
+              config: spec.config as Parameters<GoogleGenAI['live']['connect']>[0]['config'],
+              callbacks: {
+                onopen: () => {
+                  handshakeTimer = window.setTimeout(() => {
+                    finishReady();
+                  }, 650);
+                },
+                onmessage: (liveMsg: LiveServerMessage) => {
+                  const rawMsg = liveMsg as LiveServerMessage & { setupComplete?: unknown };
+                  if (rawMsg.setupComplete) {
+                    finishReady();
+                  }
+                  const sc = liveMsg.serverContent;
+                  if (sc?.interrupted) {
+                    stopPlaybackQueue();
+                    flushDraftTranscripts();
+                    setGwenState('listening');
+                  }
+                  if (sc?.inputTranscription?.text) {
+                    draftInputRef.current += sc.inputTranscription.text;
+                    setLiveDraftInput(draftInputRef.current);
+                  }
+                  if (sc?.outputTranscription?.text) {
+                    if (draftInputRef.current.trim()) {
+                      callbacksRef.current.onInputTranscript(draftInputRef.current.trim());
+                      draftInputRef.current = '';
+                      setLiveDraftInput('');
+                    }
+                    draftOutputRef.current += sc.outputTranscription.text;
+                    setLiveDraftOutput(draftOutputRef.current);
+                  }
+                  for (const part of sc?.modelTurn?.parts ?? []) {
+                    if (part.inlineData?.data) {
+                      schedulePcmPlayback(part.inlineData.data);
+                    }
+                  }
+                  if (sc?.turnComplete) {
+                    flushDraftTranscripts();
+                    if (activeSourcesRef.current.size === 0) {
+                      setGwenState('listening');
+                    }
+                  }
+                  if (liveMsg.toolCall?.functionCalls?.length) {
+                    const calls: LiveToolCall[] = liveMsg.toolCall.functionCalls.map((call) => ({
+                      id: call.id || `call-${Date.now()}`,
+                      name: call.name || '',
+                      args: (call.args ?? {}) as Record<string, unknown>,
+                    }));
+                    for (const call of calls) {
+                      callbacksRef.current.onToolCall(call);
+                    }
+                    if (liveSessionRef.current && liveSessionOpenRef.current) {
+                      try {
+                        liveSessionRef.current.sendToolResponse({
+                          functionResponses: calls.map((c) => ({
+                            id: c.id,
+                            name: c.name,
+                            response: {
+                              ok: true,
+                              status:
+                                c.name === 'composeMessage'
+                                  ? 'draft_queued_awaiting_user_confirmation'
+                                  : 'executed_on_device',
+                            },
+                          })),
+                        });
+                      } catch {
+                        // Ignore response race
+                      }
+                    }
+                  }
+                },
+                onerror: (e: unknown) => {
+                  const raw = extractRawErrorMessage(e);
+                  if (!settled) {
+                    failHandshake(1006, raw || 'Direct Gemini Live WebSocket error');
+                    return;
+                  }
+                  if (userInitiatedStopRef.current || fallbackActiveRef.current) return;
+                  receivedServerErrorRef.current = true;
+                  liveSessionOpenRef.current = false;
+                  const friendly = toFriendlyGeminiError(e);
+                  const fullErr = `${friendly.message}${raw && !friendly.message.includes(raw) ? ` (${raw})` : ''}`;
+                  setLiveDiagnostics(fullErr);
+                  if (
+                    friendly.errorCode === 'INVALID_KEY' ||
+                    friendly.errorCode === 'QUOTA_EXCEEDED'
+                  ) {
+                    callbacksRef.current.onApiKeyError?.(friendly.errorCode, fullErr);
+                  }
+                  if (friendly.errorCode === 'INVALID_KEY') {
+                    setError(fullErr);
+                    callbacksRef.current.onVoiceNotice?.(fullErr);
+                    setGwenState('error');
+                    setIsConnected(false);
+                  } else {
+                    void activateStandardVoiceFallback(fullErr, 1006);
+                  }
+                },
+                onclose: (closeEvt?: unknown) => {
+                  const ev = (closeEvt || {}) as {
+                    code?: number;
+                    reason?: string;
+                    wasClean?: boolean;
+                  };
+                  const code = typeof ev.code === 'number' ? ev.code : 1006;
+                  const reason = typeof ev.reason === 'string' ? ev.reason : '';
 
-            if (msg.errorCode === 'INVALID_KEY' || msg.errorCode === 'QUOTA_EXCEEDED') {
-              callbacksRef.current.onApiKeyError?.(msg.errorCode, fullErr);
-            }
+                  if (!settled) {
+                    failHandshake(code, reason || `Closed with code ${code}`);
+                    return;
+                  }
+                  liveSessionOpenRef.current = false;
+                  if (userInitiatedStopRef.current || fallbackActiveRef.current) {
+                    return;
+                  }
+                  if (receivedServerErrorRef.current) {
+                    setIsConnected(false);
+                    return;
+                  }
+                  if (code === 1000) {
+                    setIsConnected(false);
+                    setGwenState((prev) =>
+                      prev === 'error' || prev === 'dormant' ? prev : 'idle'
+                    );
+                    return;
+                  }
+                  const exactClose = describeWsClose(code, reason);
+                  void activateStandardVoiceFallback(exactClose, code);
+                },
+              },
+            })
+            .then((sess) => {
+              sessionRef = sess;
+              if (settled) {
+                try {
+                  sess.close();
+                } catch {
+                  // Ignore
+                }
+              }
+            })
+            .catch((err) => {
+              const raw = extractRawErrorMessage(err);
+              failHandshake(1006, raw);
+            });
+        });
+      };
 
-            // If key is invalid/missing, stop and prompt user to fix key; otherwise auto-switch to Standard Voice Mode
-            if (msg.errorCode === 'INVALID_KEY' || msg.fallbackRecommended === false) {
-              setError(fullErr);
-              callbacksRef.current.onVoiceNotice?.(fullErr);
-              setGwenState('error');
-              setIsConnected(false);
-            } else {
-              void activateStandardVoiceFallback(fullErr, msg.code);
-            }
-          } else if (msg.type === 'closed') {
-            const code = typeof msg.code === 'number' ? msg.code : 1000;
-            const reason = msg.reason || '';
-            if (
-              !userInitiatedStopRef.current &&
-              !receivedServerErrorRef.current &&
-              !fallbackActiveRef.current &&
-              code !== 1000
-            ) {
-              const detail = describeWsClose(code, reason);
-              void activateStandardVoiceFallback(detail, code);
-            } else if (!fallbackActiveRef.current) {
-              setIsConnected(false);
-              setGwenState((prev) =>
-                prev === 'error' || prev === 'dormant' ? prev : 'idle'
-              );
-            }
+      let connected: {
+        session: Awaited<ReturnType<GoogleGenAI['live']['connect']>>;
+        model: string;
+        toolsEnabled: boolean;
+      } | null = null;
+      let lastFailure: { code: number; reason: string; model: string; label: string } | null = null;
+
+      for (const spec of attempts) {
+        if (userInitiatedStopRef.current) return;
+        try {
+          connected = await tryConnectAttempt(spec);
+          break;
+        } catch (err) {
+          const fail = err as { code?: number; reason?: string; model?: string; label?: string };
+          const code = typeof fail.code === 'number' ? fail.code : 1006;
+          const reason = fail.reason || extractRawErrorMessage(err);
+          lastFailure = {
+            code,
+            reason,
+            model: fail.model || spec.model,
+            label: fail.label || spec.label,
+          };
+          const friendly = toFriendlyGeminiError(reason);
+          if (friendly.errorCode === 'INVALID_KEY') {
+            setError(friendly.message);
+            setLiveDiagnostics(friendly.message);
+            callbacksRef.current.onApiKeyError?.('INVALID_KEY', friendly.message);
+            callbacksRef.current.onVoiceNotice?.(friendly.message);
+            setGwenState('error');
+            setIsConnected(false);
+            return;
           }
-        } catch {
-          // Ignore malformed ws message
         }
-      };
+      }
 
-      ws.onerror = () => {
-        // Do not swallow the close code/reason; ws.onclose immediately follows with the exact CloseEvent
-        setLiveDiagnostics(`WebSocket transport error on ${wsUrl} (readyState=${ws.readyState})`);
-      };
+      if (userInitiatedStopRef.current) {
+        connected?.session.close();
+        return;
+      }
 
-      ws.onclose = (closeEvent: CloseEvent) => {
-        if (userInitiatedStopRef.current || fallbackActiveRef.current) {
-          return;
-        }
-        if (receivedServerErrorRef.current) {
-          setIsConnected(false);
-          return;
-        }
-        if (closeEvent.code === 1000) {
-          setIsConnected(false);
-          setGwenState((prev) => (prev === 'error' || prev === 'dormant' ? prev : 'idle'));
-          return;
-        }
-        // Surface exact close.code & close.reason (silently switching to calm Standard Voice Mode on code 1006)
-        const exactClose = describeWsClose(closeEvent.code, closeEvent.reason);
-        void activateStandardVoiceFallback(exactClose, closeEvent.code);
-      };
+      if (!connected) {
+        const finalCode = lastFailure?.code ?? 1006;
+        const finalReason = lastFailure?.reason ?? 'Unable to open Gemini Live WebSocket.';
+        const exactClose = describeWsClose(finalCode, finalReason);
+        void activateStandardVoiceFallback(exactClose, finalCode);
+        return;
+      }
+
+      liveSessionRef.current = connected.session;
+      liveSessionOpenRef.current = true;
+      setVoiceTransportMode('live');
+      setActiveLiveModel(connected.model);
+      setIsConnected(true);
+      setGwenState('listening');
+      setError(null);
+      if (connected.model && connected.toolsEnabled === false) {
+        callbacksRef.current.onVoiceNotice?.(
+          `Connected Live Voice on ${connected.model} (minimal audio mode).`
+        );
+      }
+      void attachMicPipeline(inputCtx, micStream);
     } catch (err) {
       const errName = err instanceof Error ? err.name : 'UnknownError';
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -1578,9 +1742,16 @@ export function useGwenLive({
   ]);
 
   const sendLiveText = useCallback((text: string) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'text', text }));
-      return true;
+    if (liveSessionRef.current && liveSessionOpenRef.current) {
+      try {
+        liveSessionRef.current.sendClientContent({
+          turns: [{ role: 'user', parts: [{ text }] }],
+          turnComplete: true,
+        });
+        return true;
+      } catch {
+        return false;
+      }
     }
     return false;
   }, []);
@@ -1648,8 +1819,14 @@ export function useGwenLive({
         latestScreenFrameRef.current = base64;
         setScreenPreviewUrl(dataUrl);
 
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && base64) {
-          wsRef.current.send(JSON.stringify({ type: 'video', video: base64 }));
+        if (liveSessionRef.current && liveSessionOpenRef.current && base64) {
+          try {
+            liveSessionRef.current.sendRealtimeInput({
+              video: { data: base64, mimeType: 'image/jpeg' },
+            });
+          } catch {
+            // Ignore frame race
+          }
         }
       };
 
@@ -1742,8 +1919,14 @@ export function useGwenLive({
             setFaceRecognized(sim >= 0.78);
           }
 
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && base64) {
-            wsRef.current.send(JSON.stringify({ type: 'video', video: base64 }));
+          if (liveSessionRef.current && liveSessionOpenRef.current && base64) {
+            try {
+              liveSessionRef.current.sendRealtimeInput({
+                video: { data: base64, mimeType: 'image/jpeg' },
+              });
+            } catch {
+              // Ignore frame race
+            }
           }
         };
 
@@ -1790,8 +1973,14 @@ export function useGwenLive({
     latestScreenFrameRef.current = base64;
     setUploadedScreenImage(dataUrl);
     setScreenPreviewUrl(dataUrl);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && base64) {
-      wsRef.current.send(JSON.stringify({ type: 'video', video: base64 }));
+    if (liveSessionRef.current && liveSessionOpenRef.current && base64) {
+      try {
+        liveSessionRef.current.sendRealtimeInput({
+          video: { data: base64, mimeType: 'image/jpeg' },
+        });
+      } catch {
+        // Ignore frame race
+      }
     }
   }, []);
 

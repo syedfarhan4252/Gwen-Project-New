@@ -37,10 +37,8 @@ import type {
   ResponseLength,
   TextModelId,
 } from '../types/gwen';
-import {
-  getGeminiRequestHeaders,
-  type StoredApiKeyState,
-} from '../services/apiKeyStorage';
+import type { StoredApiKeyState } from '../services/apiKeyStorage';
+import { runGwenHealthCheck } from '../services/gwenClientApi';
 import { formatTimeInZone, SUPPORTED_TIMEZONES } from '../utils/timeIst';
 import { ConnectedAccountPanel } from './ConnectedAccountPanel';
 import { GeminiApiKeyPanel } from './GeminiApiKeyPanel';
@@ -209,18 +207,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const runHealthCheck = async () => {
     setCheckingHealth(true);
     try {
-      const res = await fetch('/api/gwen/health', {
-        headers: getGeminiRequestHeaders(),
-      });
-      const data = (await res.json()) as HealthCheckResult;
-      setHealth(data);
-    } catch {
+      const data = await runGwenHealthCheck();
+      setHealth(data as HealthCheckResult);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unable to reach Google Gemini API.';
       setHealth({
         ok: false,
         statusLabel: 'Unavailable',
         latencyMs: 0,
         models: [],
-        error: 'Unable to contact Gwen backend.',
+        error: msg,
       });
     } finally {
       setCheckingHealth(false);

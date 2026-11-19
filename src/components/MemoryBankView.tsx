@@ -23,7 +23,7 @@ import type {
   MemoryItem,
   VoiceprintProfile,
 } from '../types/gwen';
-import { getGeminiRequestHeaders } from '../services/apiKeyStorage';
+import { describeGwenAppearance } from '../services/gwenClientApi';
 import { IMMUTABLE_DEVELOPER_NAME, IMMUTABLE_ORIGIN_STORY } from '../shared/gwenSystemPrompt';
 import { computeSpectralSignature, extractFaceHistogram } from '../utils/biometrics';
 
@@ -206,20 +206,13 @@ export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
       const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
       const histogram = extractFaceHistogram(canvas);
 
-      // Extract concise visual trait summary via Gemini Vision
+      // Extract concise visual trait summary directly via browser Gemini Vision
       let visualSummary = identityCore.visualTraits || 'Primary user enrolled on-device.';
       try {
-        const res = await fetch('/api/gwen/describe-appearance', {
-          method: 'POST',
-          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ imageBase64: dataUrl }),
-        });
-        if (res.ok) {
-          const data = (await res.json()) as { visualSummary?: string };
-          if (data.visualSummary) visualSummary = data.visualSummary;
-        }
+        const desc = await describeGwenAppearance(dataUrl);
+        if (desc) visualSummary = desc;
       } catch {
-        // Keep local descriptor if offline
+        // Keep local descriptor if offline or unconfigured
       }
 
       onSetFaceProfile({

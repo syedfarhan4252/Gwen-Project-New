@@ -261,9 +261,22 @@ export async function validateGeminiApiKey(rawKey: string): Promise<ApiKeyValida
       `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleaned)}`,
       { method: 'GET' }
     );
+    const rawText = await res.text().catch(() => '');
 
     if (res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { models?: unknown[] };
+      let data: { models?: unknown[] } = {};
+      if (rawText.trim()) {
+        try {
+          data = JSON.parse(rawText) as { models?: unknown[] };
+        } catch {
+          return {
+            ok: false,
+            status: 'invalid',
+            code: res.status,
+            message: `Unexpected non-JSON response from Gemini API (HTTP ${res.status}).`,
+          };
+        }
+      }
       const count = Array.isArray(data.models) ? data.models.length : undefined;
       return {
         ok: true,
@@ -276,10 +289,17 @@ export async function validateGeminiApiKey(rawKey: string): Promise<ApiKeyValida
       };
     }
 
-    const errJson = (await res.json().catch(() => ({}))) as {
-      error?: { message?: string; status?: string };
-    };
-    const apiMsg = errJson.error?.message || '';
+    let apiMsg = '';
+    if (rawText.trim()) {
+      try {
+        const errJson = JSON.parse(rawText) as {
+          error?: { message?: string; status?: string };
+        };
+        apiMsg = errJson.error?.message || '';
+      } catch {
+        apiMsg = rawText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140);
+      }
+    }
 
     if (res.status === 400 || res.status === 401 || res.status === 403) {
       return {
@@ -289,7 +309,7 @@ export async function validateGeminiApiKey(rawKey: string): Promise<ApiKeyValida
         message:
           apiMsg.includes('API key not valid') || res.status === 400 || res.status === 401
             ? 'Invalid API key. Double-check that you copied the full key from Google AI Studio.'
-            : apiMsg || 'This API key does not have permission to access the Gemini API (403).',
+            : apiMsg || `This API key does not have permission to access the Gemini API (HTTP ${res.status}).`,
       };
     }
 
@@ -307,13 +327,16 @@ export async function validateGeminiApiKey(rawKey: string): Promise<ApiKeyValida
       ok: false,
       status: 'invalid',
       code: res.status,
-      message: apiMsg || `Gemini API verification returned HTTP ${res.status}.`,
+      message: apiMsg
+        ? `HTTP ${res.status}: ${apiMsg}`
+        : `Gemini API verification returned HTTP ${res.status}.`,
     };
-  } catch {
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'Network error';
     return {
       ok: false,
       status: 'invalid',
-      message: 'Could not reach Google Gemini API to verify your key. Check your internet connection and try again.',
+      message: `Could not reach Google Gemini API (${detail}). Check your internet connection and try again.`,
     };
   }
 }

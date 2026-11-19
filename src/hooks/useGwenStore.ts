@@ -17,6 +17,7 @@ import {
   KeepAndTasksService,
 } from '../services/googleWorkspace';
 import { KidsStudyStorage } from '../services/kidsStudyDb';
+import { fetchLiveWeatherClient } from '../services/gwenClientApi';
 import type {
   AlarmItem,
   CalendarEventItem,
@@ -507,16 +508,14 @@ export function useGwenStore() {
     setActiveWakeUpAlarm(null);
   }, []);
 
-  // Fetch real live Weather (using browser geolocation when available or optional city)
+  // Fetch real live Weather directly from browser (Open-Meteo + geolocation)
   const refreshWeather = useCallback(
     async (city?: string): Promise<WeatherSnapshot | null> => {
       setWeatherLoading(true);
       try {
-        let query = '';
-        if (city?.trim()) {
-          query = `?city=${encodeURIComponent(city.trim())}`;
-        } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
-          const coords = await new Promise<{ lat: number; lon: number } | null>((resolve) => {
+        let coords: { lat: number; lon: number } | null = null;
+        if (!city?.trim() && typeof navigator !== 'undefined' && navigator.geolocation) {
+          coords = await new Promise<{ lat: number; lon: number } | null>((resolve) => {
             navigator.geolocation.getCurrentPosition(
               (pos) => {
                 setSettingsState((prev) => ({ ...prev, locationPermissionGranted: true }));
@@ -526,14 +525,14 @@ export function useGwenStore() {
               { timeout: 4500, maximumAge: 180000 }
             );
           });
-          if (coords) {
-            query = `?lat=${coords.lat}&lon=${coords.lon}`;
-          }
         }
 
-        const res = await fetch(`/api/gwen/weather${query}`);
-        if (!res.ok) return null;
-        const data = (await res.json()) as WeatherSnapshot;
+        const data = await fetchLiveWeatherClient({
+          city: city?.trim() || undefined,
+          lat: coords?.lat,
+          lon: coords?.lon,
+        });
+        if (!data) return null;
         setWeather(data);
         return data;
       } catch {

@@ -147,12 +147,25 @@ async function googleApiFetch<T>(url: string, init?: RequestInit): Promise<T> {
     cachedAccessToken = null;
     throw new Error('Your Google session expired. Please tap "Reconnect" in Settings → Connected Google Account.');
   }
+  const rawText = await res.text().catch(() => '');
   if (!res.ok) {
-    const errBody = await res.json().catch(() => ({})) as { error?: { message?: string } };
-    throw new Error(errBody.error?.message || `Google API request failed (${res.status})`);
+    let errMsg = '';
+    if (rawText.trim()) {
+      try {
+        const errBody = JSON.parse(rawText) as { error?: { message?: string } };
+        errMsg = errBody.error?.message || '';
+      } catch {
+        errMsg = rawText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140);
+      }
+    }
+    throw new Error(errMsg ? `HTTP ${res.status}: ${errMsg}` : `Google API request failed (HTTP ${res.status})`);
   }
-  if (res.status === 204) return {} as T;
-  return (await res.json()) as T;
+  if (res.status === 204 || !rawText.trim()) return {} as T;
+  try {
+    return JSON.parse(rawText) as T;
+  } catch {
+    throw new Error(`Google API returned non-JSON response (HTTP ${res.status}).`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -436,9 +449,23 @@ export const DriveAndContactsService = {
         body: multipart,
       }
     );
+    const rawText = await res.text().catch(() => '');
     if (!res.ok) {
-      throw new Error(`Google Drive backup failed (${res.status})`);
+      let errMsg = '';
+      if (rawText.trim()) {
+        try {
+          const errBody = JSON.parse(rawText) as { error?: { message?: string } };
+          errMsg = errBody.error?.message || '';
+        } catch {
+          errMsg = rawText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140);
+        }
+      }
+      throw new Error(errMsg ? `Google Drive backup failed (${res.status}): ${errMsg}` : `Google Drive backup failed (HTTP ${res.status})`);
     }
-    return (await res.json()) as GoogleDriveFileItem;
+    try {
+      return JSON.parse(rawText) as GoogleDriveFileItem;
+    } catch {
+      throw new Error(`Google Drive backup returned non-JSON response (HTTP ${res.status}).`);
+    }
   },
 };

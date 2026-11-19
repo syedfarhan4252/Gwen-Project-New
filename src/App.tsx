@@ -27,12 +27,25 @@ import { useGwenLive, type LiveToolCall } from './hooks/useGwenLive';
 import { useGwenStore } from './hooks/useGwenStore';
 import { useInstallPrompt } from './hooks/useInstallPrompt';
 import {
-  getGeminiRequestHeaders,
   getStoredApiKeyState,
   markGeminiApiKeyInvalid,
   subscribeApiKeyChanges,
   type StoredApiKeyState,
 } from './services/apiKeyStorage';
+import {
+  GwenClientApiError,
+  buildGwenWebsite,
+  downloadBrowserMediaClient,
+  extractGwenMemories,
+  generateGwenImageSvg,
+  generateGwenTts,
+  generateGwenVideoStoryboard,
+  lookupPlayStoreApp,
+  parseGwenCommand,
+  runGwenWebSearch,
+  searchBrowserMediaClient,
+  sendGwenChat,
+} from './services/gwenClientApi';
 import {
   DriveAndContactsService,
   GmailService,
@@ -251,15 +264,10 @@ export default function App() {
           });
           showToast(`Opening Play Store for ${action.app.appName}`);
         } else if (action.kind === 'browser_download') {
-          const proxyUrl = `/api/gwen/proxy-download?url=${encodeURIComponent(
-            action.media.downloadUrl
-          )}&filename=${encodeURIComponent(action.media.suggestedFilename)}`;
-          const a = document.createElement('a');
-          a.href = proxyUrl;
-          a.download = action.media.suggestedFilename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+          await downloadBrowserMediaClient(
+            action.media.downloadUrl,
+            action.media.suggestedFilename
+          );
           store.appendMessage({
             role: 'action',
             mode: 'command',
@@ -289,30 +297,11 @@ export default function App() {
       if (store.settings.incognitoMode || !store.settings.autoExtractMemories) return;
       if (userMessage.trim().length < 8) return;
       try {
-        const res = await fetch('/api/gwen/extract-memories', {
-          method: 'POST',
-          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            userMessage,
-            assistantReply,
-            existingMemories: store.memories.map((m) => m.content),
-          }),
+        const data = await extractGwenMemories({
+          userMessage,
+          assistantReply,
+          existingMemories: store.memories.map((m) => m.content),
         });
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          memories?: Array<{
-            content: string;
-            category: string;
-            pinned: boolean;
-            isPermanent?: boolean;
-          }>;
-          sessionContinuity?: {
-            lastLeftTopic?: string;
-            lastSummary?: string;
-            lastUserMood?: string;
-            unfinishedThreads?: string[];
-          } | null;
-        };
 
         if (data.sessionContinuity) {
           store.updateSessionState({
@@ -360,16 +349,7 @@ export default function App() {
       setGenerationLabel(`Creating ${aspectRatio} AI artwork...`);
       setGenerationProgress(18);
       try {
-        const res = await fetch('/api/gwen/generate-image', {
-          method: 'POST',
-          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ prompt: prompt.trim(), aspectRatio, style }),
-        });
-        const data = (await res.json()) as { svg?: string; error?: string; errorCode?: string };
-        if (!res.ok || !data.svg) {
-          handleGeminiApiError(res.status, data.errorCode, data.error);
-          throw new Error(data.error || 'Could not generate image right now.');
-        }
+        const data = await generateGwenImageSvg(prompt.trim(), aspectRatio, style);
 
         setGenerationLabel('Rendering high-res PNG for Gallery...');
         setGenerationProgress(72);
@@ -399,6 +379,9 @@ export default function App() {
         });
         showToast('Saved to your gallery! Open Studio tab to view.');
       } catch (err) {
+        if (err instanceof GwenClientApiError) {
+          handleGeminiApiError(err.status, err.errorCode, err.message);
+        }
         const msg = err instanceof Error ? err.message : 'Image generation failed.';
         store.appendMessage({
           role: 'action',
@@ -412,7 +395,7 @@ export default function App() {
         setGenerationProgress(0);
       }
     },
-    [isGeneratingMedia, showToast, store]
+    [handleGeminiApiError, isGeneratingMedia, showToast, store]
   );
 
   // Studio: AI Motion Video Generator (Free-tier Gemini Storyboard -> 24fps WebM + Auto-Save)
@@ -424,20 +407,7 @@ export default function App() {
       setGenerationLabel(`Directing ${safeDur}s ${aspectRatio} AI storyboard...`);
       setGenerationProgress(15);
       try {
-        const res = await fetch('/api/gwen/generate-video', {
-          method: 'POST',
-          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ prompt: prompt.trim(), aspectRatio, duration: safeDur }),
-        });
-        const data = (await res.json()) as {
-          storyboard?: VideoStoryboardSpec;
-          error?: string;
-          errorCode?: string;
-        };
-        if (!res.ok || !data.storyboard) {
-          handleGeminiApiError(res.status, data.errorCode, data.error);
-          throw new Error(data.error || 'Could not generate video storyboard right now.');
-        }
+        const data = await generateGwenVideoStoryboard(prompt.trim(), aspectRatio, safeDur);
 
         setGenerationLabel(`Encoding ${safeDur}s ${aspectRatio} WebM motion video...`);
         const { dataUrl, mimeType, filename } = await renderVideoStoryboardToWebM(
@@ -471,6 +441,9 @@ export default function App() {
         });
         showToast('Video saved to your gallery! Open Studio tab to play.');
       } catch (err) {
+        if (err instanceof GwenClientApiError) {
+          handleGeminiApiError(err.status, err.errorCode, err.message);
+        }
         const msg = err instanceof Error ? err.message : 'Video generation failed.';
         store.appendMessage({
           role: 'action',
@@ -484,7 +457,7 @@ export default function App() {
         setGenerationProgress(0);
       }
     },
-    [isGeneratingMedia, showToast, store]
+    [handleGeminiApiError, isGeneratingMedia, showToast, store]
   );
 
   // Studio: Voice-Driven Responsive Webpage & Website Builder
@@ -495,21 +468,7 @@ export default function App() {
       setGenerationLabel('Generating responsive HTML5 / CSS / JS website...');
       setGenerationProgress(32);
       try {
-        const res = await fetch('/api/gwen/build-website', {
-          method: 'POST',
-          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ description: description.trim(), title }),
-        });
-        const data = (await res.json()) as {
-          title?: string;
-          html?: string;
-          error?: string;
-          errorCode?: string;
-        };
-        if (!res.ok || !data.html) {
-          handleGeminiApiError(res.status, data.errorCode, data.error);
-          throw new Error(data.error || 'Could not generate website right now.');
-        }
+        const data = await buildGwenWebsite(description.trim(), title);
 
         setGenerationProgress(95);
         const resolvedTitle = data.title || title || description.trim().slice(0, 42);
@@ -534,6 +493,9 @@ export default function App() {
         });
         showToast(`Website ready: ${resolvedTitle}`);
       } catch (err) {
+        if (err instanceof GwenClientApiError) {
+          handleGeminiApiError(err.status, err.errorCode, err.message);
+        }
         const msg = err instanceof Error ? err.message : 'Website builder failed.';
         store.appendMessage({
           role: 'action',
@@ -547,7 +509,7 @@ export default function App() {
         setGenerationProgress(0);
       }
     },
-    [isGeneratingMedia, showToast, store]
+    [handleGeminiApiError, isGeneratingMedia, showToast, store]
   );
 
   // Ref bridge so tool handlers can invoke live controls without circular deps
@@ -1143,21 +1105,7 @@ export default function App() {
         if (!query.trim()) return;
         showToast(`Searching Google for "${query}"...`);
         try {
-          const res = await fetch('/api/gwen/web-search', {
-            method: 'POST',
-            headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ query: query.trim(), timezone: store.settings.timezone }),
-          });
-          const data = (await res.json()) as {
-            answer?: string;
-            sources?: WebSearchSource[];
-            error?: string;
-            errorCode?: string;
-          };
-          if (!res.ok || !data.answer) {
-            handleGeminiApiError(res.status, data.errorCode, data.error);
-            throw new Error(data.error || 'Live Google Search is temporarily unavailable.');
-          }
+          const data = await runGwenWebSearch(query.trim(), store.settings.timezone);
           const sourceLines =
             data.sources && data.sources.length > 0
               ? `\n\nSources:\n${data.sources.slice(0, 4).map((s) => `• ${s.title} (${s.domain}) — ${s.url}`).join('\n')}`
@@ -1172,6 +1120,9 @@ export default function App() {
             void speakReplyRef.current(data.answer);
           }
         } catch (err) {
+          if (err instanceof GwenClientApiError) {
+            handleGeminiApiError(err.status, err.errorCode, err.message);
+          }
           const msg = err instanceof Error ? err.message : 'Live Google Search failed.';
           store.appendMessage({ role: 'gwen', mode: 'command', text: msg });
           showToast(msg);
@@ -1184,32 +1135,22 @@ export default function App() {
         if (!appQuery.trim()) return;
         showToast(`Finding ${appQuery} on Google Play Store...`);
         try {
-          const res = await fetch('/api/gwen/search-playstore', {
-            method: 'POST',
-            headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ appName: appQuery.trim() }),
-          });
-          const data = (await res.json()) as {
-            app?: PlayStoreAppResult;
-            error?: string;
-            errorCode?: string;
-          };
-          if (!res.ok || !data.app) {
-            handleGeminiApiError(res.status, data.errorCode, data.error);
-            throw new Error(data.error || 'Could not find that app on Google Play Store.');
-          }
+          const appResult = await lookupPlayStoreApp(appQuery.trim());
           setPendingConfirmation({
             id: `play-${Date.now()}`,
             kind: 'playstore_install',
-            title: `Install ${data.app.appName}`,
-            app: data.app,
+            title: `Install ${appResult.appName}`,
+            app: appResult,
           });
           store.appendMessage({
             role: 'action',
             mode: 'command',
-            text: `Found "${data.app.appName}" by ${data.app.developer} on Google Play Store — confirm to open Play Store.`,
+            text: `Found "${appResult.appName}" by ${appResult.developer} on Google Play Store — confirm to open Play Store.`,
           });
         } catch (err) {
+          if (err instanceof GwenClientApiError) {
+            handleGeminiApiError(err.status, err.errorCode, err.message);
+          }
           const msg = err instanceof Error ? err.message : 'Play Store lookup failed.';
           showToast(msg);
         }
@@ -1222,21 +1163,10 @@ export default function App() {
         const kind = value === 'file' ? 'file' : 'image';
         showToast(`Searching browser ${kind}s for "${query}"...`);
         try {
-          const res = await fetch('/api/gwen/search-browser-media', {
-            method: 'POST',
-            headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ query: query.trim(), kind }),
-          });
-          const data = (await res.json()) as {
-            candidate?: BrowserMediaCandidate | null;
-            candidates?: BrowserMediaCandidate[];
-            error?: string;
-            errorCode?: string;
-          };
+          const data = await searchBrowserMediaClient(query.trim(), kind);
           const chosen = data.candidate || data.candidates?.[0];
-          if (!res.ok || !chosen) {
-            handleGeminiApiError(res.status, data.errorCode, data.error);
-            throw new Error(data.error || `Could not find a downloadable ${kind} for "${query}".`);
+          if (!chosen) {
+            throw new Error(`Could not find a downloadable ${kind} for "${query}".`);
           }
           setPendingConfirmation({
             id: `dl-${Date.now()}`,
@@ -1906,7 +1836,7 @@ export default function App() {
     enterSleepMode: live.enterSleepMode,
   };
 
-  // Speak any text reply via Gemini TTS (gemini-3.8-flash-lite-tts) with live media volume
+  // Speak any text reply directly via browser Gemini TTS (gemini-3.8-flash-lite-tts) with live media volume
   const speakTextReply = useCallback(
     async (text: string) => {
       try {
@@ -1914,25 +1844,11 @@ export default function App() {
           ttsAudioRef.current.pause();
           ttsAudioRef.current = null;
         }
-        const res = await fetch('/api/gwen/tts', {
-          method: 'POST',
-          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            text,
-            voiceName: store.settings.voiceName,
-            style: `${store.activePersona.tone}, natural AI voice companion`,
-          }),
+        const data = await generateGwenTts({
+          text,
+          voiceName: store.settings.voiceName,
+          style: `${store.activePersona.tone}, natural AI voice companion`,
         });
-        if (!res.ok) {
-          const err = (await res.json().catch(() => ({}))) as {
-            error?: string;
-            errorCode?: string;
-          };
-          handleGeminiApiError(res.status, err.errorCode, err.error);
-          showToast(err.error || 'Could not generate speech right now.');
-          return;
-        }
-        const data = (await res.json()) as { audioBase64?: string };
         if (!data.audioBase64) return;
 
         const audio = new Audio(`data:audio/wav;base64,${data.audioBase64}`);
@@ -1944,11 +1860,16 @@ export default function App() {
           live.setGwenState(live.isConnected ? 'listening' : 'idle');
         };
         await audio.play();
-      } catch {
+      } catch (err) {
+        if (err instanceof GwenClientApiError) {
+          handleGeminiApiError(err.status, err.errorCode, err.message);
+          showToast(err.message);
+        }
         live.setGwenState(live.isConnected ? 'listening' : 'idle');
       }
     },
     [
+      handleGeminiApiError,
       live,
       showToast,
       store.activePersona.tone,
@@ -2035,65 +1956,58 @@ export default function App() {
       });
 
       try {
-        // 2. Check Hands-Free Command Intent Parser if enabled
+        // 2. Check Hands-Free Command Intent Parser directly in browser if enabled
         if (store.settings.handsFreeControlEnabled) {
-          const parseRes = await fetch('/api/gwen/parse-command', {
-            method: 'POST',
-            headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({
-              utterance: text,
-              personaNames: store.personas.map((p) => p.name),
-            }),
-          });
-          if (parseRes.ok) {
-            const parsed = (await parseRes.json()) as ParsedCommandResult;
-            if (
-              parsed.isCommand &&
-              parsed.action !== 'none' &&
-              parsed.action !== 'summarize_screen' &&
-              parsed.action !== 'translate_screen'
-            ) {
-              if (parsed.action === 'sleep_gwen') {
-                const bye =
-                  parsed.confirmationText ||
-                  'Going to sleep now. Tap Wake Gwen whenever you want to talk again.';
-                if (store.settings.autoSpeakTextReplies) {
-                  void speakTextReply(bye);
-                  handleSleepGwen(bye, 2600);
-                } else {
-                  handleSleepGwen(bye, 0);
-                }
-                setIsTextSending(false);
-                return;
+          const parsed = await parseGwenCommand(
+            text,
+            store.personas.map((p) => p.name)
+          );
+          if (
+            parsed.isCommand &&
+            parsed.action !== 'none' &&
+            parsed.action !== 'summarize_screen' &&
+            parsed.action !== 'translate_screen'
+          ) {
+            if (parsed.action === 'sleep_gwen') {
+              const bye =
+                parsed.confirmationText ||
+                'Going to sleep now. Tap Wake Gwen whenever you want to talk again.';
+              if (store.settings.autoSpeakTextReplies) {
+                void speakTextReply(bye);
+                handleSleepGwen(bye, 2600);
+              } else {
+                handleSleepGwen(bye, 0);
               }
-
-              await executeDeviceAction(
-                parsed.action,
-                parsed.target,
-                parsed.payload,
-                parsed.value,
-                parsed.platform,
-                parsed.aspectRatio,
-                parsed.style
-              );
-              if (parsed.confirmationText) {
-                store.appendMessage({
-                  role: 'gwen',
-                  mode: 'command',
-                  text: parsed.confirmationText,
-                });
-                if (store.settings.autoSpeakTextReplies) {
-                  void speakTextReply(parsed.confirmationText);
-                }
-              }
-              live.setGwenState('idle');
               setIsTextSending(false);
               return;
             }
+
+            await executeDeviceAction(
+              parsed.action,
+              parsed.target,
+              parsed.payload,
+              parsed.value,
+              parsed.platform,
+              parsed.aspectRatio,
+              parsed.style
+            );
+            if (parsed.confirmationText) {
+              store.appendMessage({
+                role: 'gwen',
+                mode: 'command',
+                text: parsed.confirmationText,
+              });
+              if (store.settings.autoSpeakTextReplies) {
+                void speakTextReply(parsed.confirmationText);
+              }
+            }
+            live.setGwenState('idle');
+            setIsTextSending(false);
+            return;
           }
         }
 
-        // 3. Call Gemini Multimodal Chat endpoint (with Screen + Camera + Identity Core + IST + Weather + Care + Zero-Forgetfulness Continuity)
+        // 3. Call Gemini Multimodal Chat directly from browser via @google/genai
         const historyPayload = store.transcript
           .filter((m) => m.role === 'user' || m.role === 'gwen')
           .slice(-14)
@@ -2102,39 +2016,29 @@ export default function App() {
             text: m.text,
           }));
 
-        const res = await fetch('/api/gwen/chat', {
-          method: 'POST',
-          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            message: text,
-            history: historyPayload,
-            persona: store.activePersona,
-            languageMode: store.settings.languageMode,
-            memories: store.settings.incognitoMode ? [] : store.memories,
-            identityCore: store.settings.incognitoMode ? undefined : store.identityCore,
-            deviceUserName: store.settings.deviceUserName,
-            timezone: store.settings.timezone,
-            weather: store.weather,
-            careState: store.careState,
-            sessionState: store.settings.incognitoMode ? undefined : store.sessionState,
-            googleAccountEmail: store.googleAccount?.email || null,
-            activeKidStudy: store.activeKidBundle,
-            allKidNames: store.kidBundles.map((b) => b.profile.name),
-            proactiveEmpathyEnabled: store.settings.proactiveEmpathyEnabled,
-            incognitoMode: store.settings.incognitoMode,
-            model: store.settings.textModel,
-            screenFrameBase64: screenFrame || undefined,
-            cameraFrameBase64: cameraFrame || undefined,
-            faceRecognized: live.faceRecognized,
-            voiceRecognized: live.voiceRecognized,
-          }),
+        const data = await sendGwenChat({
+          message: text,
+          history: historyPayload,
+          persona: store.activePersona,
+          languageMode: store.settings.languageMode,
+          memories: store.settings.incognitoMode ? [] : store.memories,
+          identityCore: store.settings.incognitoMode ? undefined : store.identityCore,
+          deviceUserName: store.settings.deviceUserName,
+          timezone: store.settings.timezone,
+          weather: store.weather,
+          careState: store.careState,
+          sessionState: store.settings.incognitoMode ? undefined : store.sessionState,
+          googleAccountEmail: store.googleAccount?.email || null,
+          activeKidStudy: store.activeKidBundle,
+          allKidNames: store.kidBundles.map((b) => b.profile.name),
+          proactiveEmpathyEnabled: store.settings.proactiveEmpathyEnabled,
+          incognitoMode: store.settings.incognitoMode,
+          model: store.settings.textModel,
+          screenFrameBase64: screenFrame || undefined,
+          cameraFrameBase64: cameraFrame || undefined,
+          faceRecognized: live.faceRecognized,
+          voiceRecognized: live.voiceRecognized,
         });
-
-        const data = (await res.json()) as { text?: string; error?: string; errorCode?: string };
-        if (!res.ok) {
-          handleGeminiApiError(res.status, data.errorCode, data.error);
-          throw new Error(data.error || 'Gwen could not complete this request.');
-        }
 
         const replyText =
           data.text?.trim() || 'I heard you — could you try asking that once more?';
@@ -2152,6 +2056,9 @@ export default function App() {
           live.setGwenState('idle');
         }
       } catch (err) {
+        if (err instanceof GwenClientApiError) {
+          handleGeminiApiError(err.status, err.errorCode, err.message);
+        }
         const msg = err instanceof Error ? err.message : 'Unable to reach Gemini right now.';
         live.setError(msg);
         live.setGwenState('error');
@@ -2162,6 +2069,7 @@ export default function App() {
     [
       applyPersonaSwitch,
       executeDeviceAction,
+      handleGeminiApiError,
       handleSleepGwen,
       live,
       runAutoMemoryExtraction,
@@ -2189,42 +2097,35 @@ export default function App() {
     // Check Hands-Free commands in Standard Voice Mode too
     if (store.settings.handsFreeControlEnabled) {
       try {
-        const parseRes = await fetch('/api/gwen/parse-command', {
-          method: 'POST',
-          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            utterance: text,
-            personaNames: store.personas.map((p) => p.name),
-          }),
-        });
-        if (parseRes.ok) {
-          const parsed = (await parseRes.json()) as ParsedCommandResult;
-          if (
-            parsed.isCommand &&
-            parsed.action !== 'none' &&
-            parsed.action !== 'summarize_screen' &&
-            parsed.action !== 'translate_screen'
-          ) {
-            if (parsed.action === 'sleep_gwen') {
-              const bye =
-                parsed.confirmationText ||
-                'Going to sleep now. Tap Wake Gwen whenever you want to talk again.';
-              handleSleepGwen(bye, 1800);
-              return bye;
-            }
-            await executeDeviceAction(
-              parsed.action,
-              parsed.target,
-              parsed.payload,
-              parsed.value,
-              parsed.platform,
-              parsed.aspectRatio,
-              parsed.style
-            );
-            const confirmMsg = parsed.confirmationText || 'Done!';
-            store.appendMessage({ role: 'gwen', mode: 'command', text: confirmMsg });
-            return confirmMsg;
+        const parsed = await parseGwenCommand(
+          text,
+          store.personas.map((p) => p.name)
+        );
+        if (
+          parsed.isCommand &&
+          parsed.action !== 'none' &&
+          parsed.action !== 'summarize_screen' &&
+          parsed.action !== 'translate_screen'
+        ) {
+          if (parsed.action === 'sleep_gwen') {
+            const bye =
+              parsed.confirmationText ||
+              'Going to sleep now. Tap Wake Gwen whenever you want to talk again.';
+            handleSleepGwen(bye, 1800);
+            return bye;
           }
+          await executeDeviceAction(
+            parsed.action,
+            parsed.target,
+            parsed.payload,
+            parsed.value,
+            parsed.platform,
+            parsed.aspectRatio,
+            parsed.style
+          );
+          const confirmMsg = parsed.confirmationText || 'Done!';
+          store.appendMessage({ role: 'gwen', mode: 'command', text: confirmMsg });
+          return confirmMsg;
         }
       } catch {
         // Fall through to normal Gemini chat
@@ -2239,10 +2140,8 @@ export default function App() {
         text: m.text,
       }));
 
-    const res = await fetch('/api/gwen/chat', {
-      method: 'POST',
-      headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
+    try {
+      const data = await sendGwenChat({
         message: text,
         history: historyPayload,
         persona: store.activePersona,
@@ -2264,24 +2163,23 @@ export default function App() {
         cameraFrameBase64: cameraFrame || undefined,
         faceRecognized: live.faceRecognized,
         voiceRecognized: live.voiceRecognized,
-      }),
-    });
+      });
 
-    const data = (await res.json()) as { text?: string; error?: string; errorCode?: string };
-    if (!res.ok) {
-      handleGeminiApiError(res.status, data.errorCode, data.error);
-      throw new Error(data.error || `Gemini chat returned HTTP ${res.status}`);
+      const replyText =
+        data.text?.trim() || 'I heard you — could you try asking that once more?';
+      store.appendMessage({
+        role: 'gwen',
+        mode: 'live',
+        text: replyText,
+      });
+      void runAutoMemoryExtraction(text, replyText);
+      return replyText;
+    } catch (err) {
+      if (err instanceof GwenClientApiError) {
+        handleGeminiApiError(err.status, err.errorCode, err.message);
+      }
+      throw err;
     }
-
-    const replyText =
-      data.text?.trim() || 'I heard you — could you try asking that once more?';
-    store.appendMessage({
-      role: 'gwen',
-      mode: 'live',
-      text: replyText,
-    });
-    void runAutoMemoryExtraction(text, replyText);
-    return replyText;
   };
 
   const handleRunShortcut = useCallback(
