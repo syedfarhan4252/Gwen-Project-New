@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Brain,
   Command,
@@ -9,6 +9,7 @@ import {
   SlidersHorizontal,
   VideoOff,
 } from 'lucide-react';
+import { ApiKeyOnboardingModal } from './components/ApiKeyOnboardingModal';
 import { CompanionView } from './components/CompanionView';
 import { CommandsCatalogView } from './components/CommandsCatalogView';
 import { ConfirmationBottomSheet } from './components/ConfirmationBottomSheet';
@@ -25,6 +26,13 @@ import { WebsitePreviewModal } from './components/WebsitePreviewModal';
 import { useGwenLive, type LiveToolCall } from './hooks/useGwenLive';
 import { useGwenStore } from './hooks/useGwenStore';
 import { useInstallPrompt } from './hooks/useInstallPrompt';
+import {
+  getGeminiRequestHeaders,
+  getStoredApiKeyState,
+  markGeminiApiKeyInvalid,
+  subscribeApiKeyChanges,
+  type StoredApiKeyState,
+} from './services/apiKeyStorage';
 import {
   DriveAndContactsService,
   GmailService,
@@ -133,6 +141,12 @@ export default function App() {
   const [pendingConfirmation, setPendingConfirmation] =
     useState<PendingConfirmationAction | null>(null);
   const [isConfirmingAction, setIsConfirmingAction] = useState(false);
+  const [apiKeyState, setApiKeyState] = useState<StoredApiKeyState>(() => getStoredApiKeyState());
+  const [apiKeyModal, setApiKeyModal] = useState<{
+    visible: boolean;
+    reason: 'launch' | 'mic';
+  }>({ visible: false, reason: 'launch' });
+  const launchKeyPromptShownRef = useRef(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -144,6 +158,51 @@ export default function App() {
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => setToast(null), 3600);
   }, []);
+
+  // Sync per-device personal Gemini API key state across storage changes
+  useEffect(() => {
+    return subscribeApiKeyChanges(() => {
+      setApiKeyState(getStoredApiKeyState());
+    });
+  }, []);
+
+  // First-time launch prompt when no personal Gemini API key is configured yet
+  useEffect(() => {
+    if (
+      store.settings.onboardingCompleted &&
+      !apiKeyState.hasKey &&
+      !launchKeyPromptShownRef.current
+    ) {
+      launchKeyPromptShownRef.current = true;
+      setApiKeyModal({ visible: true, reason: 'launch' });
+    }
+  }, [store.settings.onboardingCompleted, apiKeyState.hasKey]);
+
+  const handleOpenApiKeySettings = useCallback(() => {
+    setApiKeyModal((prev) => ({ ...prev, visible: false }));
+    setActiveTab('settings');
+    window.setTimeout(() => {
+      document.getElementById('sec-apikey')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 120);
+  }, []);
+
+  const handleGeminiApiError = useCallback(
+    (status: number, errorCode?: string, message?: string) => {
+      if (status === 401 || status === 403 || errorCode === 'INVALID_KEY') {
+        const next = markGeminiApiKeyInvalid(
+          message || 'Your Gemini API key was rejected (401/403). Please update it in Settings.'
+        );
+        setApiKeyState(next);
+        showToast('Invalid or expired Gemini API key — update it in Settings.');
+      } else if (status === 429 || errorCode === 'QUOTA_EXCEEDED') {
+        showToast('Gemini API quota reached (429) — wait briefly or switch keys in Settings.');
+      }
+    },
+    [showToast]
+  );
 
   // Execute user-confirmed action from ConfirmationBottomSheet
   const handleConfirmPendingAction = useCallback(
@@ -229,7 +288,7 @@ export default function App() {
       try {
         const res = await fetch('/api/gwen/extract-memories', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             userMessage,
             assistantReply,
@@ -300,11 +359,12 @@ export default function App() {
       try {
         const res = await fetch('/api/gwen/generate-image', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ prompt: prompt.trim(), aspectRatio, style }),
         });
-        const data = (await res.json()) as { svg?: string; error?: string };
+        const data = (await res.json()) as { svg?: string; error?: string; errorCode?: string };
         if (!res.ok || !data.svg) {
+          handleGeminiApiError(res.status, data.errorCode, data.error);
           throw new Error(data.error || 'Could not generate image right now.');
         }
 
@@ -363,14 +423,16 @@ export default function App() {
       try {
         const res = await fetch('/api/gwen/generate-video', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ prompt: prompt.trim(), aspectRatio, duration: safeDur }),
         });
         const data = (await res.json()) as {
           storyboard?: VideoStoryboardSpec;
           error?: string;
+          errorCode?: string;
         };
         if (!res.ok || !data.storyboard) {
+          handleGeminiApiError(res.status, data.errorCode, data.error);
           throw new Error(data.error || 'Could not generate video storyboard right now.');
         }
 
@@ -432,15 +494,17 @@ export default function App() {
       try {
         const res = await fetch('/api/gwen/build-website', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ description: description.trim(), title }),
         });
         const data = (await res.json()) as {
           title?: string;
           html?: string;
           error?: string;
+          errorCode?: string;
         };
         if (!res.ok || !data.html) {
+          handleGeminiApiError(res.status, data.errorCode, data.error);
           throw new Error(data.error || 'Could not generate website right now.');
         }
 
@@ -1078,15 +1142,17 @@ export default function App() {
         try {
           const res = await fetch('/api/gwen/web-search', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ query: query.trim(), timezone: store.settings.timezone }),
           });
           const data = (await res.json()) as {
             answer?: string;
             sources?: WebSearchSource[];
             error?: string;
+            errorCode?: string;
           };
           if (!res.ok || !data.answer) {
+            handleGeminiApiError(res.status, data.errorCode, data.error);
             throw new Error(data.error || 'Live Google Search is temporarily unavailable.');
           }
           const sourceLines =
@@ -1117,11 +1183,16 @@ export default function App() {
         try {
           const res = await fetch('/api/gwen/search-playstore', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ appName: appQuery.trim() }),
           });
-          const data = (await res.json()) as { app?: PlayStoreAppResult; error?: string };
+          const data = (await res.json()) as {
+            app?: PlayStoreAppResult;
+            error?: string;
+            errorCode?: string;
+          };
           if (!res.ok || !data.app) {
+            handleGeminiApiError(res.status, data.errorCode, data.error);
             throw new Error(data.error || 'Could not find that app on Google Play Store.');
           }
           setPendingConfirmation({
@@ -1150,16 +1221,18 @@ export default function App() {
         try {
           const res = await fetch('/api/gwen/search-browser-media', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ query: query.trim(), kind }),
           });
           const data = (await res.json()) as {
             candidate?: BrowserMediaCandidate | null;
             candidates?: BrowserMediaCandidate[];
             error?: string;
+            errorCode?: string;
           };
           const chosen = data.candidate || data.candidates?.[0];
           if (!res.ok || !chosen) {
+            handleGeminiApiError(res.status, data.errorCode, data.error);
             throw new Error(data.error || `Could not find a downloadable ${kind} for "${query}".`);
           }
           setPendingConfirmation({
@@ -1800,7 +1873,21 @@ export default function App() {
     },
     onToolCall: handleLiveToolCall,
     onEmpathySignal: handleEmpathySignal,
+    onApiKeyError: (errorCode, message) => {
+      handleGeminiApiError(errorCode === 'QUOTA_EXCEEDED' ? 429 : 403, errorCode, message);
+    },
   });
+
+  const handleStartVoiceGuarded = useCallback(() => {
+    if (!getStoredApiKeyState().hasKey) {
+      setApiKeyModal({ visible: true, reason: 'mic' });
+      return;
+    }
+    if (live.gwenState === 'dormant') {
+      live.wakeFromSleep();
+    }
+    void live.startSession();
+  }, [live]);
 
   liveControlRef.current = {
     startScreen: live.startScreenShare,
@@ -1824,7 +1911,7 @@ export default function App() {
         }
         const res = await fetch('/api/gwen/tts', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             text,
             voiceName: store.settings.voiceName,
@@ -1832,7 +1919,11 @@ export default function App() {
           }),
         });
         if (!res.ok) {
-          const err = (await res.json().catch(() => ({}))) as { error?: string };
+          const err = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            errorCode?: string;
+          };
+          handleGeminiApiError(res.status, err.errorCode, err.error);
           showToast(err.error || 'Could not generate speech right now.');
           return;
         }
@@ -1943,7 +2034,7 @@ export default function App() {
         if (store.settings.handsFreeControlEnabled) {
           const parseRes = await fetch('/api/gwen/parse-command', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({
               utterance: text,
               personaNames: store.personas.map((p) => p.name),
@@ -2008,7 +2099,7 @@ export default function App() {
 
         const res = await fetch('/api/gwen/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             message: text,
             history: historyPayload,
@@ -2034,8 +2125,9 @@ export default function App() {
           }),
         });
 
-        const data = (await res.json()) as { text?: string; error?: string };
+        const data = (await res.json()) as { text?: string; error?: string; errorCode?: string };
         if (!res.ok) {
+          handleGeminiApiError(res.status, data.errorCode, data.error);
           throw new Error(data.error || 'Gwen could not complete this request.');
         }
 
@@ -2359,13 +2451,10 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              if (live.gwenState === 'dormant') {
-                live.wakeFromSleep();
-                void live.startSession();
-              } else if (live.isConnected) {
+              if (live.isConnected) {
                 live.stopSession();
               } else {
-                void live.startSession();
+                handleStartVoiceGuarded();
               }
             }}
             className="min-h-[38px] px-3.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
@@ -2442,7 +2531,8 @@ export default function App() {
             isTextSending={isTextSending}
             error={live.error}
             onDismissError={() => live.setError(null)}
-            onStartVoice={() => void live.startSession()}
+            onOpenApiKeySettings={handleOpenApiKeySettings}
+            onStartVoice={handleStartVoiceGuarded}
             onStopVoice={live.stopSession}
             onSleepGwen={() =>
               handleSleepGwen(
@@ -2587,6 +2677,8 @@ export default function App() {
             settings={store.settings}
             personas={store.personas}
             memoriesCount={store.memories.length}
+            apiKeyState={apiKeyState}
+            onApiKeyStateChange={setApiKeyState}
             isScreenSharing={live.isScreenSharing}
             isCameraActive={live.isCameraActive}
             wakeLockActive={live.wakeLockActive}
@@ -2708,13 +2800,10 @@ export default function App() {
         isConnected={live.isConnected}
         isScreenSharing={live.isScreenSharing}
         onWakeOrToggleVoice={() => {
-          if (live.gwenState === 'dormant') {
-            live.wakeFromSleep();
-            void live.startSession();
-          } else if (live.isConnected) {
+          if (live.isConnected) {
             live.stopSession();
           } else {
-            void live.startSession();
+            handleStartVoiceGuarded();
           }
         }}
         onQuickCommand={(text) => {
@@ -2741,6 +2830,27 @@ export default function App() {
           }
           showToast(`Welcome, ${name}! Gwen is ready.`);
         }}
+      />
+
+      {/* First-Time / Mic-Guard Personal Gemini API Key Onboarding Modal */}
+      <ApiKeyOnboardingModal
+        visible={store.settings.onboardingCompleted && apiKeyModal.visible}
+        reason={apiKeyModal.reason}
+        onVerified={(nextState) => {
+          const wasMicTrigger = apiKeyModal.reason === 'mic';
+          setApiKeyState(nextState);
+          setApiKeyModal((prev) => ({ ...prev, visible: false }));
+          live.setError(null);
+          showToast('Gemini API Key verified & saved! Gwen is ready.');
+          if (wasMicTrigger) {
+            if (live.gwenState === 'dormant') {
+              live.wakeFromSleep();
+            }
+            void live.startSession();
+          }
+        }}
+        onOpenSettings={handleOpenApiKeySettings}
+        onDismiss={() => setApiKeyModal((prev) => ({ ...prev, visible: false }))}
       />
 
       {/* Interactive Sandboxed Live Website Preview Modal */}

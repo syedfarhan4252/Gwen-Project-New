@@ -16,6 +16,7 @@ import {
   Hand,
   HeartPulse,
   ImagePlus,
+  KeyRound,
   Layers,
   Mic,
   MicOff,
@@ -106,6 +107,7 @@ interface CompanionViewProps {
   isTextSending: boolean;
   error: string | null;
   onDismissError: () => void;
+  onOpenApiKeySettings?: () => void;
   onStartVoice: () => void;
   onStopVoice: () => void;
   onSleepGwen: () => void;
@@ -200,6 +202,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({
   isTextSending,
   error,
   onDismissError,
+  onOpenApiKeySettings,
   onStartVoice,
   onStopVoice,
   onSleepGwen,
@@ -489,7 +492,24 @@ export const CompanionView: React.FC<CompanionViewProps> = ({
             color: 'var(--text-primary)',
           }}
         >
-          <p className="leading-relaxed">{error}</p>
+          <div className="space-y-2 min-w-0">
+            <p className="leading-relaxed">{error}</p>
+            {onOpenApiKeySettings &&
+              /api\s*key|quota|rate limit|invalid|expired|401|403|429/i.test(error) && (
+                <button
+                  type="button"
+                  onClick={onOpenApiKeySettings}
+                  className="min-h-[34px] px-3 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  style={{
+                    backgroundColor: 'var(--accent)',
+                    color: 'var(--accent-contrast)',
+                  }}
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  <span>Update API Key in Settings</span>
+                </button>
+              )}
+          </div>
           <button
             type="button"
             onClick={onDismissError}

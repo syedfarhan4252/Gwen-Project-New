@@ -14,6 +14,11 @@ import type {
   WeatherSnapshot,
 } from '../types/gwen';
 import {
+  getActiveGeminiApiKey,
+  getGeminiRequestHeaders,
+  subscribeApiKeyChanges,
+} from '../services/apiKeyStorage';
+import {
   computeSpectralSignature,
   cosineSimilarity,
   extractFaceHistogram,
@@ -42,6 +47,7 @@ interface UseGwenLiveOptions {
   onOutputTranscript: (text: string) => void;
   onToolCall: (call: LiveToolCall) => void;
   onEmpathySignal?: (signal: EmpathySignal) => void;
+  onApiKeyError?: (errorCode: 'INVALID_KEY' | 'QUOTA_EXCEEDED', message: string) => void;
 }
 
 function floatTo16BitPCMBase64(float32Array: Float32Array): string {
@@ -92,6 +98,7 @@ export function useGwenLive({
   onOutputTranscript,
   onToolCall,
   onEmpathySignal,
+  onApiKeyError,
 }: UseGwenLiveOptions) {
   const googleEmailRef = useRef(googleAccountEmail);
   googleEmailRef.current = googleAccountEmail;
@@ -196,12 +203,14 @@ export function useGwenLive({
     onOutputTranscript,
     onToolCall,
     onEmpathySignal,
+    onApiKeyError,
   });
   callbacksRef.current = {
     onInputTranscript,
     onOutputTranscript,
     onToolCall,
     onEmpathySignal,
+    onApiKeyError,
   };
 
   // Sync real output GainNode with deviceState.mediaVolume
@@ -266,7 +275,7 @@ export function useGwenLive({
       try {
         const res = await fetch('/api/gwen/empathy-check', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             cameraFrameBase64: frame,
             userName:
@@ -492,6 +501,7 @@ export function useGwenLive({
             hasCameraVision: isCameraActiveRef.current,
             faceRecognized: faceRecognizedRef.current,
             voiceRecognized: voiceRecognizedRef.current,
+            apiKey: getActiveGeminiApiKey() || undefined,
           })
         );
       };
@@ -503,6 +513,7 @@ export function useGwenLive({
             data?: string;
             text?: string;
             message?: string;
+            errorCode?: 'INVALID_KEY' | 'QUOTA_EXCEEDED' | 'UNAVAILABLE';
             calls?: LiveToolCall[];
           };
 
@@ -636,8 +647,12 @@ export function useGwenLive({
               callbacksRef.current.onToolCall(call);
             }
           } else if (msg.type === 'error') {
-            setError(msg.message || 'Live voice session encountered an error.');
+            const errMsg = msg.message || 'Live voice session encountered an error.';
+            setError(errMsg);
             setGwenState('error');
+            if (msg.errorCode === 'INVALID_KEY' || msg.errorCode === 'QUOTA_EXCEEDED') {
+              callbacksRef.current.onApiKeyError?.(msg.errorCode, errMsg);
+            }
           } else if (msg.type === 'closed') {
             setIsConnected(false);
             setGwenState((prev) => (prev === 'error' || prev === 'dormant' ? prev : 'idle'));
@@ -897,6 +912,32 @@ export function useGwenLive({
 
   const getLatestScreenFrame = useCallback(() => latestScreenFrameRef.current, []);
   const getLatestCameraFrame = useCallback(() => latestCameraFrameRef.current, []);
+
+  // Immediately reinitialize an active Live Voice session when the user saves/changes their API key
+  const isConnectedRef = useRef(isConnected);
+  isConnectedRef.current = isConnected;
+  const startSessionRef = useRef(startSession);
+  startSessionRef.current = startSession;
+  const stopSessionRef = useRef(stopSession);
+  stopSessionRef.current = stopSession;
+
+  useEffect(() => {
+    let lastKey = getActiveGeminiApiKey();
+    return subscribeApiKeyChanges(() => {
+      const nextKey = getActiveGeminiApiKey();
+      if (nextKey === lastKey) return;
+      lastKey = nextKey;
+      setError(null);
+      if (isConnectedRef.current) {
+        stopSessionRef.current('idle');
+        if (nextKey) {
+          window.setTimeout(() => {
+            void startSessionRef.current();
+          }, 180);
+        }
+      }
+    });
+  }, []);
 
   useEffect(() => {
     return () => {

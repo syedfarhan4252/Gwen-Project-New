@@ -23,6 +23,7 @@ import type {
   MemoryItem,
   VoiceprintProfile,
 } from '../types/gwen';
+import { getGeminiRequestHeaders } from '../services/apiKeyStorage';
 import { IMMUTABLE_DEVELOPER_NAME, IMMUTABLE_ORIGIN_STORY } from '../shared/gwenSystemPrompt';
 import { computeSpectralSignature, extractFaceHistogram } from '../utils/biometrics';
 
@@ -210,7 +211,7 @@ export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
       try {
         const res = await fetch('/api/gwen/describe-appearance', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ imageBase64: dataUrl }),
         });
         if (res.ok) {

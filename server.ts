@@ -33,11 +33,12 @@ const PORT = Number(process.env.PORT) || 3000;
 const ALLOWED_TEXT_MODELS = new Set(['gemini-4-hydrogen', 'gemini-3.1-flash-lite']);
 const ALLOWED_VOICES = new Set<VoiceName>(['Zephyr', 'Kore', 'Puck', 'Charon', 'Fenrir']);
 
-function getAiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
+function getAiClient(overrideApiKey?: string | null): GoogleGenAI {
+  const userKey = typeof overrideApiKey === 'string' ? overrideApiKey.trim() : '';
+  const apiKey = userKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error(
-      'Gemini API key is not configured on the server. Please configure GEMINI_API_KEY in Settings > Secrets.'
+      'GEMINI_API_KEY_MISSING: No Gemini API key is configured. Add your free Google AI Studio key in Settings → Gemini API Key.'
     );
   }
   return new GoogleGenAI({
@@ -49,6 +50,11 @@ function getAiClient(): GoogleGenAI {
       },
     },
   });
+}
+
+function getRequestAiClient(req: express.Request): GoogleGenAI {
+  const headerKey = req.header('x-gemini-api-key');
+  return getAiClient(headerKey);
 }
 
 function extractRawErrorMessage(err: unknown): string {
@@ -86,30 +92,45 @@ function isQuotaExhausted(err: unknown): boolean {
 function getFriendlyApiError(err: unknown): {
   status: number;
   statusLabel: 'Invalid Key' | 'Quota Exceeded' | 'Unavailable';
+  errorCode: 'INVALID_KEY' | 'QUOTA_EXCEEDED' | 'UNAVAILABLE';
   message: string;
 } {
   const raw = extractRawErrorMessage(err);
   if (raw.includes('GEMINI_API_KEY')) {
-    return { status: 503, statusLabel: 'Invalid Key', message: raw };
+    return {
+      status: 401,
+      statusLabel: 'Invalid Key',
+      errorCode: 'INVALID_KEY',
+      message: 'No Gemini API key configured. Open Settings → Gemini API Key to add your personal Google AI Studio key.',
+    };
   }
-  if (raw.includes('403') || raw.includes('PERMISSION_DENIED') || raw.includes('API_KEY_INVALID')) {
+  if (
+    raw.includes('401') ||
+    raw.includes('403') ||
+    raw.includes('PERMISSION_DENIED') ||
+    raw.includes('API_KEY_INVALID') ||
+    raw.toLowerCase().includes('api key not valid')
+  ) {
     return {
       status: 403,
       statusLabel: 'Invalid Key',
-      message: 'Gemini API authentication failed. Please check the API key in Settings > Secrets.',
+      errorCode: 'INVALID_KEY',
+      message: 'Your Gemini API key was rejected (Invalid or Expired). Open Settings → Gemini API Key to update it.',
     };
   }
   if (isQuotaExhausted(err)) {
     return {
       status: 429,
       statusLabel: 'Quota Exceeded',
-      message: 'Gemini API quota reached. Please wait a moment or check your billing tier in Settings > Secrets.',
+      errorCode: 'QUOTA_EXCEEDED',
+      message: 'Your Gemini API key reached its quota limit (429). Wait a moment or update your key in Settings → Gemini API Key.',
     };
   }
   if (isTransientHighDemand(err)) {
     return {
       status: 503,
       statusLabel: 'Unavailable',
+      errorCode: 'UNAVAILABLE',
       message: 'Gemini is temporarily experiencing high demand. Please retry in a moment.',
     };
   }
@@ -117,12 +138,14 @@ function getFriendlyApiError(err: unknown): {
     return {
       status: 404,
       statusLabel: 'Unavailable',
+      errorCode: 'UNAVAILABLE',
       message: 'The requested Gemini model is currently unavailable. Try switching models in Settings.',
     };
   }
   return {
     status: 500,
     statusLabel: 'Unavailable',
+    errorCode: 'UNAVAILABLE',
     message: raw || 'Unable to reach Gemini right now. Please retry.',
   };
 }
@@ -708,10 +731,10 @@ async function startServer() {
   app.use(express.json({ limit: '18mb' }));
 
   // Health & Live Engine Verification endpoint
-  app.get('/api/gwen/health', async (_req, res) => {
+  app.get('/api/gwen/health', async (req, res) => {
     const start = Date.now();
     try {
-      const ai = getAiClient();
+      const ai = getRequestAiClient(req);
       await ai.models.generateContent({
         model: 'gemini-3.1-flash-lite',
         contents: 'Respond with OK.',
@@ -749,10 +772,11 @@ async function startServer() {
         ],
       });
     } catch (err) {
-      const { status, statusLabel, message } = getFriendlyApiError(err);
+      const { status, statusLabel, errorCode, message } = getFriendlyApiError(err);
       res.status(status).json({
         ok: false,
         statusLabel,
+        errorCode,
         latencyMs: Date.now() - start,
         models: [],
         error: message,
@@ -763,7 +787,7 @@ async function startServer() {
   // Multimodal Chat (supports Text + Screen Frame + Camera Frame + Identity Core)
   app.post('/api/gwen/chat', async (req, res) => {
     try {
-      const ai = getAiClient();
+      const ai = getRequestAiClient(req);
       const {
         message,
         history = [],
@@ -875,15 +899,15 @@ async function startServer() {
         model: usedModel,
       });
     } catch (err) {
-      const { status, message } = getFriendlyApiError(err);
-      res.status(status).json({ error: message });
+      const { status, errorCode, message } = getFriendlyApiError(err);
+      res.status(status).json({ error: message, errorCode });
     }
   });
 
   // Extract structured visual appearance descriptors for local Face Enrollment
   app.post('/api/gwen/describe-appearance', async (req, res) => {
     try {
-      const ai = getAiClient();
+      const ai = getRequestAiClient(req);
       const { imageBase64 } = req.body as { imageBase64?: string };
       if (!imageBase64) {
         res.status(400).json({ error: 'Image snapshot is required.' });
@@ -910,7 +934,7 @@ async function startServer() {
   // Server-side Gemini TTS endpoint
   app.post('/api/gwen/tts', async (req, res) => {
     try {
-      const ai = getAiClient();
+      const ai = getRequestAiClient(req);
       const { text, voiceName = 'Zephyr', style } = req.body as {
         text: string;
         voiceName?: VoiceName;
@@ -962,15 +986,15 @@ async function startServer() {
 
       res.json({ audioBase64, mimeType: 'audio/wav' });
     } catch (err) {
-      const { status, message } = getFriendlyApiError(err);
-      res.status(status).json({ error: message });
+      const { status, errorCode, message } = getFriendlyApiError(err);
+      res.status(status).json({ error: message, errorCode });
     }
   });
 
   // Automatic Permanent Memory Extraction endpoint
   app.post('/api/gwen/extract-memories', async (req, res) => {
     try {
-      const ai = getAiClient();
+      const ai = getRequestAiClient(req);
       const { userMessage, assistantReply, existingMemories = [] } = req.body as {
         userMessage: string;
         assistantReply?: string;
@@ -1066,7 +1090,7 @@ ${assistantReply ? `Gwen replied: "${assistantReply}"` : ''}`;
   // Free-tier Gemini AI Artwork Image Generator (High-Detail Layered SVG -> Client PNG Export)
   app.post('/api/gwen/generate-image', async (req, res) => {
     try {
-      const ai = getAiClient();
+      const ai = getRequestAiClient(req);
       const {
         prompt,
         aspectRatio = '1:1',
@@ -1125,7 +1149,7 @@ Requirements:
   // Free-tier Gemini AI Motion Video Storyboard Generator (Rendered to WebM via Client Canvas+MediaRecorder)
   app.post('/api/gwen/generate-video', async (req, res) => {
     try {
-      const ai = getAiClient();
+      const ai = getRequestAiClient(req);
       const {
         prompt,
         aspectRatio = '16:9',
@@ -1193,7 +1217,7 @@ Pick vivid hex color palettes, atmospheric motifs from ["stars","mountains","cit
   // Voice-Driven Webpage & Website Builder (Self-Contained Responsive HTML/CSS/JS)
   app.post('/api/gwen/build-website', async (req, res) => {
     try {
-      const ai = getAiClient();
+      const ai = getRequestAiClient(req);
       const { description, title } = req.body as {
         description?: string;
         title?: string;
@@ -1358,7 +1382,7 @@ Requirements:
   // Proactive Multimodal Empathy Visual Cue Analyzer (Camera Frame)
   app.post('/api/gwen/empathy-check', async (req, res) => {
     try {
-      const ai = getAiClient();
+      const ai = getRequestAiClient(req);
       const { cameraFrameBase64, userName } = req.body as {
         cameraFrameBase64?: string;
         userName?: string;
@@ -1399,15 +1423,15 @@ Return JSON with condition, confidence (0..1), summary (under 12 words), and sug
       const parsed = JSON.parse((response.text ?? '{}').trim());
       res.json(parsed);
     } catch (err) {
-      const { status, message } = getFriendlyApiError(err);
-      res.status(status).json({ error: message });
+      const { status, errorCode, message } = getFriendlyApiError(err);
+      res.status(status).json({ error: message, errorCode });
     }
   });
 
   // Live Google Search Grounding Endpoint (Real-time web facts & citations)
   app.post('/api/gwen/web-search', async (req, res) => {
     try {
-      const ai = getAiClient();
+      const ai = getRequestAiClient(req);
       const { query, timezone = 'Asia/Kolkata' } = req.body as {
         query?: string;
         timezone?: string;
@@ -1517,7 +1541,7 @@ Return JSON with condition, confidence (0..1), summary (under 12 words), and sug
   // Play Store App Lookup (Confirmation-gated install via market:// & play.google.com)
   app.post('/api/gwen/search-playstore', async (req, res) => {
     try {
-      const ai = getAiClient();
+      const ai = getRequestAiClient(req);
       const { appName } = req.body as { appName?: string };
       if (!appName?.trim()) {
         res.status(400).json({ error: 'App name is required.' });
@@ -1765,7 +1789,7 @@ Return JSON with: appName (official store title), developer (publisher name), pa
   // Upgraded Voice Command Intent Parser endpoint
   app.post('/api/gwen/parse-command', async (req, res) => {
     try {
-      const ai = getAiClient();
+      const ai = getRequestAiClient(req);
       const { utterance, personaNames = [] } = req.body as {
         utterance: string;
         personaNames?: string[];
@@ -2212,6 +2236,7 @@ User message: "${rawText}"`;
           hasCameraVision?: boolean;
           faceRecognized?: boolean;
           voiceRecognized?: boolean;
+          apiKey?: string;
           audio?: string;
           video?: string;
           text?: string;
@@ -2221,7 +2246,7 @@ User message: "${rawText}"`;
           closeLiveSession();
           isClosing = false;
 
-          const ai = getAiClient();
+          const ai = getAiClient(msg.apiKey);
           const voiceName: VoiceName =
             msg.voiceName && ALLOWED_VOICES.has(msg.voiceName) ? msg.voiceName : 'Zephyr';
 
@@ -2332,8 +2357,8 @@ User message: "${rawText}"`;
                 }
               },
               onerror: (e: unknown) => {
-                const { message } = getFriendlyApiError(e);
-                sendToClient({ type: 'error', message });
+                const { message, errorCode } = getFriendlyApiError(e);
+                sendToClient({ type: 'error', message, errorCode });
               },
               onclose: () => {
                 sendToClient({ type: 'closed' });
@@ -2370,8 +2395,8 @@ User message: "${rawText}"`;
           closeLiveSession();
         }
       } catch (err) {
-        const { message } = getFriendlyApiError(err);
-        sendToClient({ type: 'error', message });
+        const { message, errorCode } = getFriendlyApiError(err);
+        sendToClient({ type: 'error', message, errorCode });
       }
     });
 

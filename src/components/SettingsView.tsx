@@ -37,8 +37,13 @@ import type {
   ResponseLength,
   TextModelId,
 } from '../types/gwen';
+import {
+  getGeminiRequestHeaders,
+  type StoredApiKeyState,
+} from '../services/apiKeyStorage';
 import { formatTimeInZone, SUPPORTED_TIMEZONES } from '../utils/timeIst';
 import { ConnectedAccountPanel } from './ConnectedAccountPanel';
+import { GeminiApiKeyPanel } from './GeminiApiKeyPanel';
 import { InstallAppButton } from './InstallAppBanner';
 import { KidsStudyHubPanel } from './KidsStudyHubPanel';
 
@@ -46,6 +51,8 @@ interface SettingsViewProps {
   settings: GwenSettings;
   personas: Persona[];
   memoriesCount: number;
+  apiKeyState: StoredApiKeyState;
+  onApiKeyStateChange: (next: StoredApiKeyState) => void;
   isScreenSharing: boolean;
   isCameraActive: boolean;
   wakeLockActive: boolean;
@@ -95,6 +102,7 @@ interface SettingsViewProps {
 type BrowserPermState = 'granted' | 'prompt' | 'denied' | 'unsupported';
 
 const SECTION_LINKS = [
+  { id: 'sec-apikey', label: 'Gemini API Key' },
   { id: 'sec-companion', label: 'Persona & Voice' },
   { id: 'sec-kids', label: 'Kids Study Hub' },
   { id: 'sec-google', label: 'Google Account' },
@@ -108,6 +116,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   settings,
   personas,
   memoriesCount,
+  apiKeyState,
+  onApiKeyStateChange,
   isScreenSharing,
   isCameraActive,
   wakeLockActive,
@@ -199,7 +209,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const runHealthCheck = async () => {
     setCheckingHealth(true);
     try {
-      const res = await fetch('/api/gwen/health');
+      const res = await fetch('/api/gwen/health', {
+        headers: getGeminiRequestHeaders(),
+      });
       const data = (await res.json()) as HealthCheckResult;
       setHealth(data);
     } catch {
@@ -303,7 +315,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </h1>
             <p className="text-xs sm:text-sm text-[var(--text-secondary)] truncate">
               {activePersona?.name || 'Gwen'} ·{' '}
-              {googleAccount ? `Linked: ${googleAccount.email}` : 'Google Account Not Linked'} ·{' '}
+              {apiKeyState.status === 'verified'
+                ? 'Gemini Key Verified'
+                : apiKeyState.status === 'invalid'
+                  ? 'Gemini Key Needs Attention'
+                  : 'Gemini Key Not Configured'}{' '}
+              · {googleAccount ? `Linked: ${googleAccount.email}` : 'Google Not Linked'} ·{' '}
               {memoriesCount} memories
             </p>
             <p className="text-xs text-[var(--text-muted)] flex items-center gap-1.5 font-mono-tabular">
@@ -672,15 +689,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           onQuickWorkspaceAction={onQuickWorkspaceAction}
         />
 
-        {/* Server-Side Gemini Engine Verification (No API Key Input UI) */}
-        <div className="pt-5 border-t border-[var(--border-hairline)] space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {/* Per-Device Personal Gemini / Google AI Studio API Key Management */}
+        <div
+          id="sec-apikey"
+          className="pt-5 border-t border-[var(--border-hairline)] space-y-5 scroll-mt-6"
+        >
+          <GeminiApiKeyPanel
+            apiKeyState={apiKeyState}
+            onApiKeyStateChange={onApiKeyStateChange}
+            onNotify={onNotify}
+          />
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
             <div>
               <h3 className="text-sm font-semibold text-[var(--text-primary)]">
                 Gemini Intelligence Engine
               </h3>
               <p className="text-xs text-[var(--text-muted)]">
-                Server-secured Gemini Live, Vision &amp; Search Grounding models.
+                Powered dynamically by your personal Google AI Studio API key for Live Voice, Vision &amp; Search.
               </p>
             </div>
             <button
