@@ -27,57 +27,43 @@ export const FirstLaunchModal: React.FC<FirstLaunchModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="gwen-welcome-title"
-      className="fixed inset-0 z-[70] flex items-center justify-center p-4"
-      style={{ backgroundColor: 'rgba(4, 8, 15, 0.86)' }}
+      className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
     >
-      <div
-        className="w-full max-w-md rounded-3xl border p-6 sm:p-7 space-y-5 shadow-2xl"
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          borderColor: 'var(--border-strong)',
-        }}
-      >
+      <div className="w-full max-w-md rounded-3xl glass-sheet border border-white/[0.12] p-6 space-y-5">
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <h1
-              id="gwen-welcome-title"
-              className="font-display text-2xl font-bold tracking-tight text-[var(--text-primary)]"
-            >
-              Welcome to Gwen
-            </h1>
-            <span
-              className="inline-flex items-center gap-1 text-[11px] font-mono-tabular px-2.5 py-1 rounded-lg border"
-              style={{
-                borderColor: 'var(--border-hairline)',
-                color: 'var(--accent)',
-              }}
-            >
+            <div className="flex items-center gap-2.5">
+              <span className="h-9 w-9 rounded-2xl aurora-badge font-display text-base font-bold flex items-center justify-center shrink-0">
+                G
+              </span>
+              <h1
+                id="gwen-welcome-title"
+                className="font-display text-xl font-bold tracking-tight text-[var(--text-primary)]"
+              >
+                Welcome to Gwen
+              </h1>
+            </div>
+            <span className="inline-flex items-center text-[10px] font-mono-tabular px-2.5 py-1 rounded-full glass-pill text-[var(--accent)]">
               IST · UTC+5:30
             </span>
           </div>
-          <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+          <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed">
             Your 1-on-1 AI voice companion, camera-aware assistant, and creative studio.
           </p>
         </div>
 
         {/* Locked Developer Attribution & Ben 10 Origin Card */}
-        <div
-          className="rounded-2xl border p-4 space-y-2"
-          style={{
-            backgroundColor: 'var(--bg-elevated)',
-            borderColor: 'var(--border-hairline)',
-          }}
-        >
-          <div className="flex items-center gap-2 text-xs font-semibold text-[var(--accent)]">
+        <div className="rounded-2xl glass-card p-3.5 space-y-1.5">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--accent)]">
             <Lock className="h-3.5 w-3.5 shrink-0" />
-            <span>Created & Developed by {IMMUTABLE_DEVELOPER_NAME}</span>
+            <span>Created &amp; Developed by {IMMUTABLE_DEVELOPER_NAME}</span>
           </div>
           <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
             {IMMUTABLE_ORIGIN_STORY}
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-3.5">
           <div className="space-y-1.5">
             <label
               htmlFor="gwen-device-user-input"
@@ -91,13 +77,8 @@ export const FirstLaunchModal: React.FC<FirstLaunchModalProps> = ({
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Enter your name (stored locally on this device)"
-              className="w-full min-h-[46px] px-3.5 rounded-xl border text-sm outline-none focus:ring-2"
-              style={{
-                backgroundColor: 'var(--bg-canvas)',
-                borderColor: 'var(--border-strong)',
-                color: 'var(--text-primary)',
-              }}
+              placeholder="Enter your name (saved locally)"
+              className="w-full h-11 px-3.5 rounded-xl bg-white/[0.06] border border-white/[0.1] text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-cyan-400/50"
             />
           </div>
 
@@ -105,11 +86,7 @@ export const FirstLaunchModal: React.FC<FirstLaunchModalProps> = ({
             <button
               type="button"
               onClick={() => onComplete(IMMUTABLE_DEVELOPER_NAME)}
-              className="min-h-[44px] px-3.5 rounded-xl border text-xs font-medium flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors hover:bg-white/5"
-              style={{
-                borderColor: 'var(--border-hairline)',
-                color: 'var(--text-secondary)',
-              }}
+              className="h-10 px-3.5 rounded-full glass-pill text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
             >
               <ShieldCheck className="h-3.5 w-3.5 text-[var(--accent)]" />
               <span>I am {IMMUTABLE_DEVELOPER_NAME}</span>
@@ -118,11 +95,7 @@ export const FirstLaunchModal: React.FC<FirstLaunchModalProps> = ({
             <button
               type="submit"
               disabled={!name.trim()}
-              className="flex-1 min-h-[44px] px-4 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer disabled:opacity-45"
-              style={{
-                backgroundColor: 'var(--accent)',
-                color: 'var(--accent-contrast)',
-              }}
+              className="flex-1 h-10 px-4 rounded-full cta-aurora text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer disabled:opacity-45"
             >
               <UserCheck className="h-4 w-4" />
               <span>Start with Gwen</span>

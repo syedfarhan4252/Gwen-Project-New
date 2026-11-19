@@ -31,7 +31,7 @@ interface ConnectedAccountPanelProps {
 }
 
 const GoogleGIcon: React.FC = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
+  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
     <path
       fill="#4285F4"
       d="M23.49 12.27c0-.79-.07-1.55-.2-2.27H12v4.3h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.09 3.56-5.16 3.56-8.65z"
@@ -99,63 +99,51 @@ export const ConnectedAccountPanel: React.FC<ConnectedAccountPanelProps> = ({
     {
       key: 'gmail',
       label: 'Gmail',
-      detail: 'Read unread mail, search threads & send emails with confirmation',
-      icon: <Mail className="h-4 w-4 text-[var(--accent)]" />,
+      detail: 'Read unread mail & send emails with confirmation',
+      icon: <Mail className="h-4 w-4 text-cyan-400" />,
     },
     {
       key: 'calendar',
-      label: 'Google Calendar (IST Default)',
-      detail: 'Check daily agenda, schedule meetings & delete events with confirmation',
-      icon: <Calendar className="h-4 w-4 text-[var(--accent)]" />,
+      label: 'Google Calendar (IST)',
+      detail: 'Check daily agenda & schedule meetings',
+      icon: <Calendar className="h-4 w-4 text-violet-400" />,
     },
     {
       key: 'tasksAndNotes',
-      label: 'Google Tasks & Keep-Style Notes',
-      detail: 'Sync checklists, to-dos & local notes seamlessly',
-      icon: <ListTodo className="h-4 w-4 text-[var(--accent)]" />,
+      label: 'Google Tasks & Notes',
+      detail: 'Sync checklists & Keep-style notes',
+      icon: <ListTodo className="h-4 w-4 text-emerald-400" />,
     },
     {
       key: 'drive',
       label: 'Google Drive',
-      detail: 'Find documents & back up notes directly to your Drive',
-      icon: <FolderOpen className="h-4 w-4 text-[var(--accent)]" />,
+      detail: 'Find documents & back up notes',
+      icon: <FolderOpen className="h-4 w-4 text-sky-400" />,
     },
     {
       key: 'contacts',
       label: 'Google Contacts',
-      detail: 'Look up email addresses & phone numbers by name',
-      icon: <Users className="h-4 w-4 text-[var(--accent)]" />,
+      detail: 'Look up emails & phone numbers by name',
+      icon: <Users className="h-4 w-4 text-amber-400" />,
     },
   ];
 
   return (
-    <div className="space-y-5">
-      {/* Account Status Card */}
-      <div
-        className="rounded-2xl p-4 sm:p-5 border space-y-4"
-        style={{
-          backgroundColor: 'var(--bg-elevated)',
-          borderColor: googleAccount ? 'var(--accent-ring)' : 'var(--border-hairline)',
-        }}
-      >
+    <div className="space-y-4">
+      {/* Account Status */}
+      <div className="rounded-2xl p-3.5 bg-white/[0.03] border border-white/[0.08] space-y-3">
         {googleAccount ? (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3.5 min-w-0">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               {googleAccount.photoURL ? (
                 <img
                   src={googleAccount.photoURL}
                   alt={googleAccount.displayName}
                   referrerPolicy="no-referrer"
-                  className="h-12 w-12 rounded-full object-cover border border-[var(--border-hairline)] shrink-0"
+                  className="h-10 w-10 rounded-full object-cover border border-white/[0.12] shrink-0"
                 />
               ) : (
-                <div
-                  className="h-12 w-12 rounded-full flex items-center justify-center font-display text-base font-bold shrink-0"
-                  style={{
-                    backgroundColor: 'var(--accent-soft)',
-                    color: 'var(--accent)',
-                  }}
-                >
+                <div className="h-10 w-10 rounded-full aurora-badge font-display text-sm font-bold flex items-center justify-center shrink-0">
                   {(googleAccount.displayName || 'G').slice(0, 1).toUpperCase()}
                 </div>
               )}
@@ -165,48 +153,39 @@ export const ConnectedAccountPanel: React.FC<ConnectedAccountPanelProps> = ({
                     {googleAccount.displayName}
                   </span>
                   {googleTokenReady && (
-                    <CheckCircle2 className="h-4 w-4 text-[var(--success)] shrink-0" />
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
                   )}
                 </div>
                 <p className="text-xs text-[var(--text-secondary)] truncate">
-                  Linked as {googleAccount.email}
-                </p>
-                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
-                  {googleTokenReady
-                    ? 'Active Workspace session · Access token held securely in memory'
-                    : 'Session needs a fresh Google sign-in tap to unlock live Workspace APIs'}
+                  {googleAccount.email}
                 </p>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
               {!googleTokenReady && (
                 <button
                   type="button"
                   disabled={connecting}
                   onClick={() => void handleConnect(false)}
-                  className="min-h-[40px] px-3.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--accent)',
-                    color: 'var(--accent-contrast)',
-                  }}
+                  className="h-8 px-3 rounded-full cta-aurora text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${connecting ? 'animate-spin' : ''}`} />
-                  <span>Reconnect Session</span>
+                  <span>Reconnect</span>
                 </button>
               )}
               <button
                 type="button"
                 disabled={connecting}
                 onClick={() => void handleConnect(true)}
-                className="min-h-[40px] px-3.5 rounded-xl text-xs font-semibold bg-[var(--bg-surface)] border border-[var(--border-hairline)] text-[var(--text-primary)] hover:border-[var(--accent)] whitespace-nowrap cursor-pointer"
+                className="h-8 px-3 rounded-full glass-pill text-xs font-medium text-[var(--text-primary)] cursor-pointer"
               >
-                Switch Account
+                Switch
               </button>
               <button
                 type="button"
                 onClick={() => void onDisconnectGoogle()}
-                className="min-h-[40px] px-3.5 rounded-xl text-xs font-semibold bg-[var(--bg-surface)] border border-[var(--border-hairline)] text-[var(--text-secondary)] hover:text-[var(--danger)] flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                className="h-8 px-3 rounded-full glass-pill text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--danger)] flex items-center gap-1 cursor-pointer"
               >
                 <LogOut className="h-3.5 w-3.5" />
                 <span>Disconnect</span>
@@ -214,13 +193,13 @@ export const ConnectedAccountPanel: React.FC<ConnectedAccountPanelProps> = ({
             </div>
           </div>
         ) : (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="space-y-1">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5">
               <div className="text-sm font-semibold text-[var(--text-primary)]">
-                Not Linked · Personal Google Workspace
+                Link Personal Google Account
               </div>
-              <p className="text-xs text-[var(--text-secondary)] leading-relaxed max-w-xl">
-                Link your own Gmail / Google account on this device so Gwen can read &amp; draft emails, check your Google Calendar, sync tasks, search Drive, and look up Contacts. Tokens stay strictly in memory.
+              <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                Manage Gmail, Calendar, Tasks, Drive &amp; Contacts privately on this device.
               </p>
             </div>
 
@@ -228,7 +207,7 @@ export const ConnectedAccountPanel: React.FC<ConnectedAccountPanelProps> = ({
               type="button"
               disabled={connecting}
               onClick={() => void handleConnect(true)}
-              className="min-h-[44px] px-4 rounded-xl text-sm font-semibold bg-white text-[#1f1f1f] border border-[#dadce0] hover:bg-[#f8f9fa] shadow-sm flex items-center justify-center gap-2.5 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+              className="h-10 px-4 rounded-full bg-white text-[#111827] hover:bg-white/90 text-xs font-semibold flex items-center justify-center gap-2 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
             >
               <GoogleGIcon />
               <span>{connecting ? 'Connecting...' : 'Sign in with Google'}</span>
@@ -237,24 +216,24 @@ export const ConnectedAccountPanel: React.FC<ConnectedAccountPanelProps> = ({
         )}
 
         {errorMsg && (
-          <p className="text-xs text-[var(--danger)] bg-[var(--danger-soft)] rounded-xl px-3.5 py-2.5">
+          <p className="text-xs text-rose-200 bg-rose-500/15 border border-rose-400/25 rounded-xl px-3 py-2">
             {errorMsg}
           </p>
         )}
 
         {googleAccount && googleTokenReady && (
-          <div className="pt-3 border-t border-[var(--border-hairline)] flex flex-wrap gap-2">
+          <div className="pt-2.5 border-t border-white/[0.06] flex flex-wrap gap-1.5">
             {[
-              { label: 'Check Unread Gmail', cmd: 'Check my unread Gmail messages' },
-              { label: 'Sync Calendar', cmd: 'What is on my Google Calendar?' },
-              { label: 'View Tasks', cmd: 'List my Google Tasks and notes' },
-              { label: 'Search Drive', cmd: 'Search my Google Drive files' },
+              { label: 'Unread Gmail', cmd: 'Check my unread Gmail messages' },
+              { label: 'Calendar', cmd: 'What is on my Google Calendar?' },
+              { label: 'Tasks', cmd: 'List my Google Tasks and notes' },
+              { label: 'Drive', cmd: 'Search my Google Drive files' },
             ].map((item) => (
               <button
                 key={item.label}
                 type="button"
                 onClick={() => onQuickWorkspaceAction(item.cmd)}
-                className="min-h-[38px] px-3 rounded-xl text-xs font-semibold bg-[var(--bg-surface)] border border-[var(--border-hairline)] text-[var(--text-primary)] hover:border-[var(--accent)] whitespace-nowrap cursor-pointer"
+                className="h-8 px-3 rounded-full glass-pill text-[11px] font-medium text-[var(--text-primary)] hover:bg-white/[0.12] cursor-pointer"
               >
                 {item.label}
               </button>
@@ -263,108 +242,85 @@ export const ConnectedAccountPanel: React.FC<ConnectedAccountPanelProps> = ({
         )}
       </div>
 
-      {/* Granular Workspace Permission Toggles */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-[var(--text-secondary)]">
-            Workspace Services Included on Sign-In
-          </h3>
-          <span className="text-[11px] text-[var(--text-muted)]">
-            Confirmation required before sending emails or changing events
-          </span>
-        </div>
-
-        <div className="divide-y divide-[var(--border-hairline)] rounded-2xl border border-[var(--border-hairline)] bg-[var(--bg-elevated)] px-4">
-          {scopeRows.map((row) => {
-            const enabled = workspaceScopes[row.key];
-            return (
-              <div
-                key={row.key}
-                className="py-3 flex items-center justify-between gap-3"
-              >
-                <div className="flex items-start gap-3 min-w-0">
-                  <div className="mt-0.5 shrink-0">{row.icon}</div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-[var(--text-primary)]">
-                      {row.label}
-                    </div>
-                    <p className="text-xs text-[var(--text-muted)]">{row.detail}</p>
+      {/* Granular Workspace Services */}
+      <div className="rounded-2xl bg-white/[0.03] border border-white/[0.07] divide-y divide-white/[0.06] px-3.5">
+        {scopeRows.map((row) => {
+          const enabled = workspaceScopes[row.key];
+          return (
+            <div key={row.key} className="py-2.5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="shrink-0">{row.icon}</span>
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-[var(--text-primary)] truncate">
+                    {row.label}
                   </div>
+                  <p className="text-[11px] text-[var(--text-muted)] truncate">{row.detail}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => onUpdateWorkspaceScopes({ [row.key]: !enabled })}
-                  className="min-h-[36px] px-3.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors"
-                  style={{
-                    backgroundColor: enabled ? 'var(--accent)' : 'var(--bg-surface)',
-                    color: enabled ? 'var(--accent-contrast)' : 'var(--text-secondary)',
-                  }}
-                >
-                  {enabled ? 'Enabled' : 'Off'}
-                </button>
               </div>
-            );
-          })}
-        </div>
+              <button
+                type="button"
+                onClick={() => onUpdateWorkspaceScopes({ [row.key]: !enabled })}
+                className={`h-7 px-3 rounded-full text-[11px] font-semibold border shrink-0 cursor-pointer transition-colors ${
+                  enabled
+                    ? 'bg-cyan-400/15 border-cyan-400/35 text-[var(--accent)]'
+                    : 'glass-pill text-[var(--text-muted)]'
+                }`}
+              >
+                {enabled ? 'On' : 'Off'}
+              </button>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Keep-Style Local-Synced Notes Quick Pad */}
-      <div className="rounded-2xl p-4 bg-[var(--bg-elevated)] border border-[var(--border-hairline)] space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-              Keep-Style Notes &amp; Checklists
-            </h3>
-            <p className="text-xs text-[var(--text-muted)]">
-              Stored privately on this device and synced with Google Tasks when linked.
-            </p>
-          </div>
-          <span className="text-xs font-mono-tabular text-[var(--text-muted)]">
+      {/* Keep-Style Local-Synced Notes */}
+      <div className="rounded-2xl p-3.5 bg-white/[0.03] border border-white/[0.07] space-y-2.5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold text-[var(--text-primary)]">
+            Keep-Style Quick Notes
+          </h3>
+          <span className="text-[11px] font-mono-tabular text-[var(--text-muted)]">
             {keepNotes.length} notes
           </span>
         </div>
 
-        <form onSubmit={handleAddNote} className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+        <form onSubmit={handleAddNote} className="flex flex-col sm:flex-row gap-2">
           <input
             type="text"
             value={noteTitle}
             onChange={(e) => setNoteTitle(e.target.value)}
-            placeholder="Note title"
-            className="sm:col-span-2 h-10 rounded-xl px-3 text-xs bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-hairline)] focus:outline-none focus:border-[var(--accent)]"
+            placeholder="Title"
+            className="sm:w-36 h-9 rounded-xl px-3 text-xs bg-white/[0.05] text-[var(--text-primary)] border border-white/[0.08] focus:outline-none focus:border-cyan-400/45"
           />
           <input
             type="text"
             value={noteContent}
             onChange={(e) => setNoteContent(e.target.value)}
-            placeholder="Write a quick note or shopping item..."
-            className="sm:col-span-2 h-10 rounded-xl px-3 text-xs bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-hairline)] focus:outline-none focus:border-[var(--accent)]"
+            placeholder="Write a quick note..."
+            className="flex-1 h-9 rounded-xl px-3 text-xs bg-white/[0.05] text-[var(--text-primary)] border border-white/[0.08] focus:outline-none focus:border-cyan-400/45"
           />
           <button
             type="submit"
-            className="min-h-[40px] px-3.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
-            style={{
-              backgroundColor: 'var(--accent)',
-              color: 'var(--accent-contrast)',
-            }}
+            className="h-9 px-3.5 rounded-full glass-pill text-xs font-semibold text-[var(--accent)] hover:bg-white/[0.12] flex items-center justify-center gap-1 shrink-0 cursor-pointer"
           >
             <Plus className="h-3.5 w-3.5" />
-            <span>Add Note</span>
+            <span>Add</span>
           </button>
         </form>
 
         {keepNotes.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 max-h-48 overflow-y-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pt-1">
             {keepNotes.slice(0, 6).map((note) => (
               <div
                 key={note.id}
-                className="rounded-xl p-3 bg-[var(--bg-surface)] border border-[var(--border-hairline)] flex items-start justify-between gap-2"
+                className="rounded-xl p-2.5 bg-white/[0.04] border border-white/[0.07] flex items-start justify-between gap-2"
               >
                 <div className="min-w-0">
                   <div className="text-xs font-semibold text-[var(--text-primary)] truncate">
                     {note.title}
                   </div>
                   {note.content && (
-                    <p className="text-xs text-[var(--text-secondary)] line-clamp-2 mt-0.5">
+                    <p className="text-[11px] text-[var(--text-secondary)] line-clamp-2 mt-0.5">
                       {note.content}
                     </p>
                   )}
@@ -373,7 +329,7 @@ export const ConnectedAccountPanel: React.FC<ConnectedAccountPanelProps> = ({
                   type="button"
                   onClick={() => onDeleteKeepNote(note.id)}
                   aria-label={`Delete note ${note.title}`}
-                  className="h-7 w-7 rounded-lg flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--danger)] shrink-0 cursor-pointer"
+                  className="h-7 w-7 rounded-full flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--danger)] shrink-0 cursor-pointer"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>

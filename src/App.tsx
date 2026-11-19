@@ -2,9 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Brain,
   Command,
-  Mic,
   MonitorOff,
-  PhoneOff,
   Radio,
   SlidersHorizontal,
   VideoOff,
@@ -16,7 +14,6 @@ import { ConfirmationBottomSheet } from './components/ConfirmationBottomSheet';
 import { FirstLaunchModal } from './components/FirstLaunchModal';
 import { FloatingOverlayAvatar } from './components/FloatingOverlayAvatar';
 import {
-  InstallAppBanner,
   InstallAppButton,
   OfflineIndicator,
 } from './components/InstallAppBanner';
@@ -198,11 +195,12 @@ export default function App() {
     setApiKeyModal((prev) => ({ ...prev, visible: false }));
     setActiveTab('settings');
     window.setTimeout(() => {
+      window.dispatchEvent(new Event('gwen:open-apikey-settings'));
       document.getElementById('sec-apikey')?.scrollIntoView({
         behavior: 'smooth',
         block: 'start',
       });
-    }, 120);
+    }, 100);
   }, []);
 
   const handleGeminiApiError = useCallback(
@@ -2280,15 +2278,13 @@ export default function App() {
   const activePrivacyBarCount = (live.isScreenSharing ? 1 : 0) + (live.isCameraActive ? 1 : 0);
   const topOffsetClass =
     activePrivacyBarCount === 2 ? 'pt-22' : activePrivacyBarCount === 1 ? 'pt-11' : '';
-  const mobileHeaderTopClass =
-    activePrivacyBarCount === 2 ? 'top-22' : activePrivacyBarCount === 1 ? 'top-11' : 'top-0';
 
   // Subtle software brightness dimmer driven by System Settings Brightness slider
   const brightnessDimOpacity = Math.max(0, Math.min(0.62, (100 - store.deviceState.brightness) / 145));
 
   return (
     <div
-      className="min-h-screen flex flex-col lg:flex-row relative"
+      className="min-h-[100dvh] h-[100dvh] lg:h-auto lg:min-h-screen flex flex-col lg:flex-row relative aurora-mesh overflow-hidden lg:overflow-visible"
       style={{
         backgroundColor: 'var(--bg-canvas)',
         color: 'var(--text-primary)',
@@ -2317,27 +2313,23 @@ export default function App() {
 
       {/* Persistent Privacy Indicators Stack (Screen Share + Live Camera Vision) */}
       {activePrivacyBarCount > 0 && (
-        <div className="fixed top-0 left-0 right-0 z-50 flex flex-col shadow-md">
+        <div className="fixed top-0 left-0 right-0 z-50 flex flex-col backdrop-blur-xl">
           {live.isScreenSharing && (
             <div
               role="status"
-              className="h-11 px-4 flex items-center justify-between gap-3 text-xs font-semibold"
-              style={{
-                backgroundColor: 'var(--accent)',
-                color: 'var(--accent-contrast)',
-              }}
+              className="h-10 px-4 flex items-center justify-between gap-3 text-xs font-semibold bg-violet-600/90 text-white border-b border-white/15"
             >
               <div className="flex items-center gap-2 truncate">
-                <span className="h-2 w-2 rounded-full bg-current shrink-0" aria-hidden="true" />
-                <span className="truncate">Screen Active — Gwen is viewing your shared screen</span>
+                <span className="h-2 w-2 rounded-full bg-white animate-pulse shrink-0" aria-hidden="true" />
+                <span className="truncate">Screen Active — Gwen is viewing your screen</span>
               </div>
               <button
                 type="button"
                 onClick={live.stopScreenShare}
-                className="h-8 px-3 rounded-lg bg-black/20 hover:bg-black/30 flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                className="h-7 px-3 rounded-full bg-black/25 hover:bg-black/40 flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <MonitorOff className="h-3.5 w-3.5" />
-                <span>Stop Sharing</span>
+                <span>Stop</span>
               </button>
             </div>
           )}
@@ -2345,52 +2337,52 @@ export default function App() {
           {live.isCameraActive && (
             <div
               role="status"
-              className="h-11 px-4 flex items-center justify-between gap-3 text-xs font-semibold border-t border-black/15"
-              style={{
-                backgroundColor: '#059669',
-                color: '#ffffff',
-              }}
+              className="h-10 px-4 flex items-center justify-between gap-3 text-xs font-semibold bg-cyan-600/90 text-white border-b border-white/15"
             >
               <div className="flex items-center gap-2 truncate">
-                <span className="h-2 w-2 rounded-full bg-white shrink-0" aria-hidden="true" />
+                <span className="h-2 w-2 rounded-full bg-white animate-pulse shrink-0" aria-hidden="true" />
                 <span className="truncate">
-                  Camera Active ({store.settings.cameraFacingMode === 'user' ? 'Front' : 'Rear'}) — Live Vision Streaming
+                  Camera Vision ({store.settings.cameraFacingMode === 'user' ? 'Front' : 'Rear'})
                   {live.faceRecognized && store.identityCore.displayName
-                    ? ` · Recognized ${store.identityCore.nickname || store.identityCore.displayName}`
+                    ? ` · ${store.identityCore.nickname || store.identityCore.displayName}`
                     : ''}
                 </span>
               </div>
               <button
                 type="button"
                 onClick={live.stopCameraVision}
-                className="h-8 px-3 rounded-lg bg-black/25 hover:bg-black/40 flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                className="h-7 px-3 rounded-full bg-black/25 hover:bg-black/40 flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <VideoOff className="h-3.5 w-3.5" />
-                <span>Turn Off Camera</span>
+                <span>Off</span>
               </button>
             </div>
           )}
         </div>
       )}
 
-      {/* Desktop Left Navigation Rail */}
+      {/* Desktop Left Navigation Rail (Obsidian Glass) */}
       <aside
-        className={`hidden lg:flex lg:flex-col lg:w-64 shrink-0 border-r justify-between px-4 py-6 ${
-          activePrivacyBarCount === 2 ? 'pt-28' : activePrivacyBarCount === 1 ? 'pt-16' : ''
+        className={`hidden lg:flex lg:flex-col lg:w-60 shrink-0 border-r border-white/[0.08] bg-white/[0.025] backdrop-blur-2xl justify-between px-3.5 py-5 ${
+          activePrivacyBarCount === 2 ? 'pt-24' : activePrivacyBarCount === 1 ? 'pt-14' : ''
         }`}
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          borderColor: 'var(--border-hairline)',
-        }}
       >
-        <div className="space-y-8">
-          <div className="px-3">
-            <span className="font-display text-2xl font-bold tracking-tight text-[var(--text-primary)]">
-              Gwen
+        <div className="space-y-6">
+          <div className="px-2.5 flex items-center gap-2.5">
+            <span className="h-8 w-8 rounded-xl aurora-badge font-display text-base font-bold flex items-center justify-center shrink-0">
+              G
             </span>
+            <div>
+              <div className="font-display text-lg font-bold tracking-tight text-[var(--text-primary)] leading-none">
+                Gwen
+              </div>
+              <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                AI Voice Companion
+              </div>
+            </div>
           </div>
 
-          <nav aria-label="Primary navigation" className="space-y-1.5">
+          <nav aria-label="Primary navigation" className="space-y-1">
             {navItems.map((item) => {
               const active = activeTab === item.id;
               return (
@@ -2398,16 +2390,24 @@ export default function App() {
                   key={item.id}
                   type="button"
                   onClick={() => setActiveTab(item.id)}
-                  className="w-full min-h-[46px] px-3.5 rounded-2xl flex items-center gap-3 text-sm font-medium transition-colors whitespace-nowrap cursor-pointer"
-                  style={{
-                    backgroundColor: active ? 'var(--accent-soft)' : 'transparent',
-                    color: active ? 'var(--accent)' : 'var(--text-secondary)',
-                  }}
+                  className={`w-full h-11 px-3 rounded-2xl flex items-center gap-3 text-xs font-semibold transition-all whitespace-nowrap cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/50 ${
+                    active
+                      ? 'bg-white/[0.09] text-[var(--text-primary)] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/[0.04]'
+                  }`}
                 >
-                  {item.icon}
+                  <span
+                    className={
+                      active
+                        ? 'text-[var(--accent)] drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]'
+                        : ''
+                    }
+                  >
+                    {item.icon}
+                  </span>
                   <span>{item.label}</span>
                   {item.id === 'memory' && store.memories.length > 0 && (
-                    <span className="ml-auto font-mono-tabular text-xs text-[var(--text-muted)]">
+                    <span className="ml-auto font-mono-tabular text-[11px] text-[var(--text-muted)]">
                       {store.memories.length}
                     </span>
                   )}
@@ -2417,10 +2417,11 @@ export default function App() {
           </nav>
         </div>
 
-        <div className="px-3 pt-4 border-t border-[var(--border-hairline)] space-y-2.5">
+        <div className="px-2.5 pt-4 border-t border-white/[0.08] space-y-2.5">
           {!installPrompt.isInstalled && (
             <InstallAppButton
               compact
+              label="Install Gwen App"
               className="w-full"
               isInstallable={installPrompt.isInstallable}
               isInstalled={installPrompt.isInstalled}
@@ -2430,83 +2431,26 @@ export default function App() {
               onNotify={showToast}
             />
           )}
-          <div className="space-y-1">
-            <p className="text-xs font-medium text-[var(--text-secondary)] truncate">
-              {store.settings.deviceUserName
-                ? `User: ${store.settings.deviceUserName}`
-                : store.activePersona.name}
+          <div className="space-y-0.5">
+            <p className="text-xs font-medium text-[var(--text-primary)] truncate">
+              {store.settings.deviceUserName || store.activePersona.name}
             </p>
-            <p className="text-xs text-[var(--text-muted)]">
+            <p className="text-[11px] text-[var(--text-muted)]">
               Created by {IMMUTABLE_DEVELOPER_NAME}
             </p>
           </div>
         </div>
       </aside>
 
-      {/* Mobile Compact Top App Bar (56px) */}
-      <header
-        className={`lg:hidden sticky z-30 h-14 px-4 flex items-center justify-between gap-2 border-b ${mobileHeaderTopClass}`}
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          borderColor: 'var(--border-hairline)',
-        }}
-      >
-        <span className="font-display text-xl font-bold tracking-tight text-[var(--text-primary)] whitespace-nowrap shrink-0">
-          Gwen
-        </span>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <InstallAppButton
-            compact
-            isInstallable={installPrompt.isInstallable}
-            isInstalled={installPrompt.isInstalled}
-            isIOS={installPrompt.isIOS}
-            isAndroid={installPrompt.isAndroid}
-            onPromptInstall={installPrompt.promptInstall}
-            onNotify={showToast}
-          />
-          <button
-            type="button"
-            onClick={() => {
-              if (live.isConnected) {
-                live.stopSession();
-              } else {
-                handleStartVoiceGuarded();
-              }
-            }}
-            className="min-h-[38px] px-3.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
-            style={{
-              backgroundColor: live.isConnected ? 'var(--danger)' : 'var(--accent)',
-              color: live.isConnected ? '#ffffff' : 'var(--accent-contrast)',
-            }}
-          >
-            {live.isConnected ? <PhoneOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
-            <span>
-              {live.gwenState === 'dormant'
-                ? 'Wake'
-                : live.isConnected
-                  ? 'End Call'
-                  : 'Talk Live'}
-            </span>
-          </button>
-        </div>
-      </header>
-
-      {/* Main Scrollable Content Canvas */}
+      {/* Main Content Canvas (Zero repetition: Memory/Commands/Settings open directly with their own focused header) */}
       <main
         ref={mainScrollRef}
-        className={`flex-1 overflow-y-auto pb-24 lg:pb-8 ${topOffsetClass}`}
+        className={`flex-1 min-h-0 ${
+          activeTab === 'companion'
+            ? 'overflow-hidden lg:overflow-y-auto pb-16 lg:pb-0'
+            : 'overflow-y-auto pb-24 lg:pb-8'
+        } ${topOffsetClass}`}
       >
-        <InstallAppBanner
-          isInstallable={installPrompt.isInstallable}
-          isInstalled={installPrompt.isInstalled}
-          isIOS={installPrompt.isIOS}
-          isAndroid={installPrompt.isAndroid}
-          bannerDismissed={installPrompt.bannerDismissed}
-          onDismissBanner={installPrompt.dismissBanner}
-          onPromptInstall={installPrompt.promptInstall}
-          onNotify={showToast}
-        />
         {activeTab === 'companion' && (
           <CompanionView
             settings={store.settings}
@@ -2538,6 +2482,11 @@ export default function App() {
             isCameraActive={live.isCameraActive}
             cameraPreviewUrl={live.cameraPreviewUrl}
             faceRecognized={live.faceRecognized}
+            isInstallable={installPrompt.isInstallable}
+            isInstalled={installPrompt.isInstalled}
+            isIOS={installPrompt.isIOS}
+            isAndroid={installPrompt.isAndroid}
+            onPromptInstall={installPrompt.promptInstall}
             voiceRecognized={live.voiceRecognized}
             wakeLockActive={live.wakeLockActive}
             audioLevel={live.audioLevel}
@@ -2784,14 +2733,11 @@ export default function App() {
         )}
       </main>
 
-      {/* Mobile Fixed Bottom Tab Bar (64px) */}
+      {/* Mobile Fixed Frosted Glass Bottom Navigation Bar (64px) */}
       <nav
         aria-label="Mobile navigation"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 grid grid-cols-4 h-16 pb-safe border-t"
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          borderColor: 'var(--border-hairline)',
-        }}
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 grid grid-cols-4 h-16 pb-safe border-t border-white/[0.11] backdrop-blur-2xl"
+        style={{ backgroundColor: 'var(--bg-nav)' }}
       >
         {navItems.map((item) => {
           const active = activeTab === item.id;
@@ -2800,13 +2746,30 @@ export default function App() {
               key={item.id}
               type="button"
               onClick={() => setActiveTab(item.id)}
-              className="flex flex-col items-center justify-center gap-1 min-h-[48px] transition-colors cursor-pointer"
-              style={{
-                color: active ? 'var(--accent)' : 'var(--text-muted)',
-              }}
+              className={`relative flex flex-col items-center justify-center gap-1 h-full border-0 outline-none focus:outline-none focus-visible:outline-none transition-colors cursor-pointer ${
+                active ? 'text-[var(--accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+              }`}
             >
-              {item.icon}
-              <span className="text-[11px] font-medium tracking-tight whitespace-nowrap">
+              {active && (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-0 left-1/2 -translate-x-1/2 h-[2px] w-9 rounded-full bg-gradient-to-r from-cyan-400 to-violet-500 shadow-[0_0_12px_rgba(34,211,238,0.8)]"
+                />
+              )}
+              <span
+                className={`transition-all ${
+                  active
+                    ? 'text-[var(--accent)] drop-shadow-[0_0_10px_rgba(34,211,238,0.75)]'
+                    : ''
+                }`}
+              >
+                {item.icon}
+              </span>
+              <span
+                className={`text-[10px] tracking-tight whitespace-nowrap ${
+                  active ? 'font-semibold text-[var(--text-primary)]' : 'font-medium'
+                }`}
+              >
                 {item.label}
               </span>
             </button>
@@ -2898,17 +2861,12 @@ export default function App() {
       {/* Offline Status Toast */}
       <OfflineIndicator isOnline={installPrompt.isOnline} />
 
-      {/* Subtle Action Toast */}
+      {/* Subtle Frosted Glass Toast */}
       {toast && (
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-20 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl text-xs font-medium shadow-xl border whitespace-nowrap max-w-[92vw] truncate"
-          style={{
-            backgroundColor: 'var(--bg-elevated)',
-            borderColor: 'var(--border-strong)',
-            color: 'var(--text-primary)',
-          }}
+          className="fixed bottom-16 lg:bottom-6 left-1/2 -translate-x-1/2 z-[85] px-4 py-2 rounded-full glass-dock text-xs font-medium text-[var(--text-primary)] whitespace-nowrap max-w-[92vw] truncate"
         >
           {toast}
         </div>

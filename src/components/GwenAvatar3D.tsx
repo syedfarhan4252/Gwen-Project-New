@@ -675,26 +675,28 @@ export const GwenAvatar3D: React.FC<GwenAvatar3DProps> = ({
   }
 
   return (
-    <div className="relative w-full max-w-[300px] h-[272px] mx-auto select-none">
-      {/* Precision Futuristic HUD Corner Brackets (clean static vectors, no backdrop-blur over WebGL) */}
+    <div className="relative w-full max-w-[300px] lg:max-w-[340px] h-[235px] sm:h-[275px] lg:h-[325px] mx-auto select-none">
+      {/* Ultra-subtle open orbital halo ring behind 3D avatar (no boxy corner brackets) */}
       <svg
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 w-full h-full opacity-45"
+        className="pointer-events-none absolute inset-0 w-full h-full opacity-30"
         viewBox="0 0 300 272"
         fill="none"
       >
-        <path d="M16 36V16H36" stroke="var(--accent)" strokeWidth="1.5" />
-        <path d="M264 16H284V36" stroke="var(--accent)" strokeWidth="1.5" />
-        <path d="M16 236V256H36" stroke="var(--accent)" strokeWidth="1.5" />
-        <path d="M264 256H284V236" stroke="var(--accent)" strokeWidth="1.5" />
         <circle
           cx="150"
-          cy="136"
-          r="112"
-          stroke="var(--border-strong)"
+          cy="138"
+          r="114"
+          stroke="url(#gwenOrbitalGrad)"
           strokeWidth="1"
-          strokeDasharray="4 6"
+          strokeDasharray="3 8"
         />
+        <defs>
+          <linearGradient id="gwenOrbitalGrad" x1="36" y1="24" x2="264" y2="252" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#22d3ee" stopOpacity="0.65" />
+            <stop offset="1" stopColor="#8b5cf6" stopOpacity="0.55" />
+          </linearGradient>
+        </defs>
       </svg>
 
       {/* Isolated WebGL Mount Container */}
@@ -724,7 +726,7 @@ export const GwenAvatar3D: React.FC<GwenAvatar3DProps> = ({
             onPttEnd?.();
           }
         }}
-        className="absolute inset-0 z-10 rounded-3xl focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] cursor-pointer touch-none"
+        className="absolute inset-0 z-10 rounded-full focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/50 cursor-pointer touch-none"
       >
         <span className="sr-only">{ariaLabel}</span>
       </button>

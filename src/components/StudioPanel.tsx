@@ -68,9 +68,9 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
   };
 
   return (
-    <div className="space-y-4">
-      {/* Mode Switcher */}
-      <div className="grid grid-cols-3 gap-1.5">
+    <div className="space-y-3.5">
+      {/* Segmented Mode Switcher */}
+      <div className="grid grid-cols-3 gap-1.5 p-1 rounded-full bg-white/[0.04] border border-white/[0.07]">
         {(
           [
             { id: 'image', label: 'Image', icon: <ImageIcon className="h-3.5 w-3.5" /> },
@@ -84,14 +84,13 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
               key={tab.id}
               type="button"
               onClick={() => setStudioMode(tab.id)}
-              className="min-h-[40px] px-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
-              style={{
-                backgroundColor: active ? 'var(--accent-soft)' : 'var(--bg-elevated)',
-                borderColor: active ? 'var(--accent)' : 'var(--border-hairline)',
-                color: active ? 'var(--accent)' : 'var(--text-secondary)',
-              }}
+              className={`h-8 rounded-full text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer transition-all ${
+                active
+                  ? 'bg-white/[0.12] text-[var(--text-primary)] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
             >
-              {tab.icon}
+              <span className={active ? 'text-[var(--accent)]' : ''}>{tab.icon}</span>
               <span>{tab.label}</span>
             </button>
           );
@@ -99,26 +98,14 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
       </div>
 
       {/* Creation Form */}
-      <form
-        onSubmit={handleSubmit}
-        className="rounded-2xl border p-3.5 space-y-3"
-        style={{
-          backgroundColor: 'var(--bg-elevated)',
-          borderColor: 'var(--border-hairline)',
-        }}
-      >
+      <form onSubmit={handleSubmit} className="rounded-2xl p-3.5 glass-card space-y-2.5">
         {studioMode === 'website' && (
           <input
             type="text"
             value={siteTitle}
             onChange={(e) => setSiteTitle(e.target.value)}
             placeholder="Website title (optional)"
-            className="w-full min-h-[40px] px-3 rounded-xl border text-xs outline-none"
-            style={{
-              backgroundColor: 'var(--bg-canvas)',
-              borderColor: 'var(--border-hairline)',
-              color: 'var(--text-primary)',
-            }}
+            className="w-full h-9 px-3 rounded-xl border border-white/[0.08] bg-white/[0.05] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-cyan-400/45"
           />
         )}
 
@@ -130,31 +117,25 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
             studioMode === 'image'
               ? 'Describe an image (e.g., Neon skyline over calm ocean at dusk)...'
               : studioMode === 'video'
-                ? 'Describe a motion scene (e.g., Aurora ribbons gliding over snowy peaks)...'
-                : 'Describe your webpage (e.g., Modern coffee roastery landing page with menu)...'
+                ? 'Describe a motion clip (e.g., Aurora ribbons gliding over peaks)...'
+                : 'Describe your webpage (e.g., Modern coffee roastery landing page)...'
           }
-          className="w-full p-3 rounded-xl border text-xs outline-none resize-none"
-          style={{
-            backgroundColor: 'var(--bg-canvas)',
-            borderColor: 'var(--border-hairline)',
-            color: 'var(--text-primary)',
-          }}
+          className="w-full p-3 rounded-xl border border-white/[0.08] bg-white/[0.05] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-cyan-400/45 resize-none"
         />
 
         {studioMode !== 'website' && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <div className="flex items-center gap-1">
               {ASPECT_OPTIONS.map((ar) => (
                 <button
                   key={ar}
                   type="button"
                   onClick={() => setAspectRatio(ar)}
-                  className="h-8 px-2 rounded-lg border text-[11px] font-mono-tabular cursor-pointer"
-                  style={{
-                    backgroundColor: aspectRatio === ar ? 'var(--accent-soft)' : 'transparent',
-                    borderColor: aspectRatio === ar ? 'var(--accent)' : 'var(--border-hairline)',
-                    color: aspectRatio === ar ? 'var(--accent)' : 'var(--text-muted)',
-                  }}
+                  className={`h-7 px-2 rounded-full border text-[10px] font-mono-tabular cursor-pointer transition-colors ${
+                    aspectRatio === ar
+                      ? 'bg-cyan-400/15 border-cyan-400/35 text-[var(--accent)]'
+                      : 'bg-white/[0.04] border-white/[0.07] text-[var(--text-muted)]'
+                  }`}
                 >
                   {ar}
                 </button>
@@ -165,12 +146,7 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
               <select
                 value={style}
                 onChange={(e) => setStyle(e.target.value)}
-                className="flex-1 min-h-[32px] px-2 rounded-lg border text-[11px] outline-none"
-                style={{
-                  backgroundColor: 'var(--bg-canvas)',
-                  borderColor: 'var(--border-hairline)',
-                  color: 'var(--text-primary)',
-                }}
+                className="flex-1 h-7 px-2.5 rounded-full border border-white/[0.08] bg-white/[0.05] text-[11px] text-[var(--text-primary)] outline-none"
               >
                 <option value="cinematic digital illustration">Cinematic</option>
                 <option value="cyberpunk neon sci-fi">Cyberpunk Neon</option>
@@ -181,12 +157,7 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
               <select
                 value={duration}
                 onChange={(e) => setDuration(Number(e.target.value))}
-                className="flex-1 min-h-[32px] px-2 rounded-lg border text-[11px] font-mono-tabular outline-none"
-                style={{
-                  backgroundColor: 'var(--bg-canvas)',
-                  borderColor: 'var(--border-hairline)',
-                  color: 'var(--text-primary)',
-                }}
+                className="flex-1 h-7 px-2.5 rounded-full border border-white/[0.08] bg-white/[0.05] text-[11px] font-mono-tabular text-[var(--text-primary)] outline-none"
               >
                 <option value={4}>4s Clip</option>
                 <option value={6}>6s Clip</option>
@@ -200,23 +171,19 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
         <button
           type="submit"
           disabled={!prompt.trim() || isGeneratingMedia}
-          className="w-full min-h-[42px] px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer disabled:opacity-50"
-          style={{
-            backgroundColor: 'var(--accent)',
-            color: 'var(--accent-contrast)',
-          }}
+          className="w-full h-10 px-4 rounded-full glass-pill hover:bg-white/[0.12] border-cyan-400/30 text-xs font-semibold text-[var(--text-primary)] flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer disabled:opacity-45"
         >
           {isGeneratingMedia ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent)]" />
               <span>{generationLabel || 'Rendering...'}</span>
             </>
           ) : (
-            <span>
+            <span className="text-[var(--accent)]">
               {studioMode === 'image'
                 ? 'Generate & Save Image'
                 : studioMode === 'video'
-                  ? 'Render & Save Motion Video'
+                  ? 'Render Motion Video'
                   : 'Build & Preview Website'}
             </span>
           )}
@@ -224,56 +191,40 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
 
         {isGeneratingMedia && (
           <div className="space-y-1">
-            <div className="h-1.5 w-full rounded-full overflow-hidden bg-white/10">
+            <div className="h-1 w-full rounded-full overflow-hidden bg-white/[0.08]">
               <div
-                className="h-full transition-all duration-300"
-                style={{
-                  width: `${Math.max(12, generationProgress)}%`,
-                  backgroundColor: 'var(--accent)',
-                }}
+                className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-violet-500 transition-all duration-300"
+                style={{ width: `${Math.max(12, generationProgress)}%` }}
               />
             </div>
-            <p className="text-[11px] font-mono-tabular text-[var(--text-muted)] text-right">
+            <p className="text-[10px] font-mono-tabular text-[var(--text-muted)] text-right">
               {generationProgress}%
             </p>
           </div>
         )}
       </form>
 
-      {/* Local Gallery Archive (Images & Videos) */}
+      {/* Local Gallery Archive */}
       {mediaCreations.length > 0 && (
-        <div className="space-y-2.5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-[var(--text-secondary)]">
-              Saved Gallery ({mediaCreations.length})
-            </h3>
-            <span className="text-[10px] font-mono-tabular text-[var(--text-muted)]">
-              Pictures/Gwen & Movies/Gwen
-            </span>
-          </div>
-
-          <div className="space-y-2.5">
+        <div className="space-y-2">
+          <h3 className="text-xs font-semibold text-[var(--text-secondary)]">
+            Saved Gallery ({mediaCreations.length})
+          </h3>
+          <div className="space-y-2">
             {mediaCreations.slice(0, 6).map((item) => (
-              <div
-                key={item.id}
-                className="rounded-2xl border overflow-hidden"
-                style={{
-                  backgroundColor: 'var(--bg-elevated)',
-                  borderColor: 'var(--border-hairline)',
-                }}
-              >
+              <div key={item.id} className="rounded-2xl glass-card overflow-hidden">
                 {item.kind === 'image' ? (
                   <img
                     src={item.dataUrl}
                     alt={item.prompt}
-                    className="w-full max-h-56 object-contain bg-black/40"
+                    className="w-full max-h-52 object-contain bg-black/40"
                   />
                 ) : (
                   <video
                     src={item.dataUrl}
                     controls
                     playsInline
-                    className="w-full max-h-56 bg-black"
+                    className="w-full max-h-52 bg-black"
                   />
                 )}
                 <div className="p-3 flex items-center justify-between gap-2">
@@ -292,21 +243,16 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
                         downloadDataUrlToDevice(item.dataUrl, item.filename);
                         onNotify('Saved to your gallery!');
                       }}
-                      className="h-8 px-2.5 rounded-lg border text-[11px] font-medium flex items-center gap-1 whitespace-nowrap cursor-pointer"
-                      style={{
-                        borderColor: 'var(--border-hairline)',
-                        color: 'var(--accent)',
-                      }}
+                      className="h-7 px-2.5 rounded-full glass-pill text-[11px] font-medium text-[var(--accent)] flex items-center gap-1 cursor-pointer"
                     >
-                      <Download className="h-3.5 w-3.5" />
+                      <Download className="h-3 w-3" />
                       <span>Save</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => onDeleteMedia(item.id)}
                       aria-label="Delete creation"
-                      className="h-8 w-8 rounded-lg border flex items-center justify-center cursor-pointer text-[var(--text-muted)] hover:text-red-400"
-                      style={{ borderColor: 'var(--border-hairline)' }}
+                      className="h-7 w-7 rounded-full flex items-center justify-center text-[var(--text-muted)] hover:text-rose-400 cursor-pointer"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -327,11 +273,7 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
           {websiteCreations.slice(0, 5).map((site) => (
             <div
               key={site.id}
-              className="rounded-2xl border p-3 flex items-center justify-between gap-2"
-              style={{
-                backgroundColor: 'var(--bg-elevated)',
-                borderColor: 'var(--border-hairline)',
-              }}
+              className="rounded-2xl glass-card p-3 flex items-center justify-between gap-2"
             >
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-[var(--text-primary)] truncate">
@@ -345,11 +287,7 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => onOpenWebsitePreview(site)}
-                  className="h-8 px-2.5 rounded-lg text-[11px] font-semibold flex items-center gap-1 whitespace-nowrap cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--accent)',
-                    color: 'var(--accent-contrast)',
-                  }}
+                  className="h-7 px-2.5 rounded-full bg-cyan-400/15 border border-cyan-400/35 text-[11px] font-semibold text-[var(--accent)] flex items-center gap-1 cursor-pointer"
                 >
                   <ExternalLink className="h-3 w-3" />
                   <span>Preview</span>
@@ -361,8 +299,7 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
                     onNotify(`Saved ${site.storagePath}`);
                   }}
                   aria-label="Download HTML"
-                  className="h-8 w-8 rounded-lg border flex items-center justify-center cursor-pointer text-[var(--text-secondary)]"
-                  style={{ borderColor: 'var(--border-hairline)' }}
+                  className="h-7 w-7 rounded-full glass-pill flex items-center justify-center text-[var(--text-secondary)] cursor-pointer"
                 >
                   <Download className="h-3.5 w-3.5" />
                 </button>
@@ -370,8 +307,7 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
                   type="button"
                   onClick={() => onDeleteWebsite(site.id)}
                   aria-label="Delete website"
-                  className="h-8 w-8 rounded-lg border flex items-center justify-center cursor-pointer text-[var(--text-muted)] hover:text-red-400"
-                  style={{ borderColor: 'var(--border-hairline)' }}
+                  className="h-7 w-7 rounded-full flex items-center justify-center text-[var(--text-muted)] hover:text-rose-400 cursor-pointer"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>

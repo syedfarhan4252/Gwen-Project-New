@@ -52,7 +52,7 @@ export const GeminiApiKeyPanel: React.FC<GeminiApiKeyPanelProps> = ({
         onNotify?.('Clipboard is empty');
       }
     } catch {
-      onNotify?.('Clipboard access blocked — paste directly into the field (Ctrl/Cmd+V)');
+      onNotify?.('Paste directly into the field (Ctrl/Cmd+V)');
     }
   };
 
@@ -94,68 +94,53 @@ export const GeminiApiKeyPanel: React.FC<GeminiApiKeyPanelProps> = ({
   const statusMeta =
     apiKeyState.status === 'verified'
       ? {
-          label: 'Connected (Verified)',
-          color: '#10b981',
-          bg: 'rgba(16, 185, 129, 0.14)',
+          label: 'Verified',
+          dot: '#34d399',
+          pill: 'bg-emerald-500/12 border-emerald-400/30 text-emerald-300',
         }
       : apiKeyState.status === 'invalid'
         ? {
-            label: 'Invalid / Expired',
-            color: '#ef4444',
-            bg: 'rgba(239, 68, 68, 0.14)',
+            label: 'Invalid',
+            dot: '#f87171',
+            pill: 'bg-rose-500/12 border-rose-400/30 text-rose-300',
           }
         : {
-            label: 'Not Configured',
-            color: '#f59e0b',
-            bg: 'rgba(245, 158, 11, 0.14)',
+            label: 'Not Set',
+            dot: '#fbbf24',
+            pill: 'bg-amber-500/12 border-amber-400/30 text-amber-300',
           };
 
   return (
-    <div
-      className="rounded-2xl p-4 sm:p-5 border space-y-4"
-      style={{
-        backgroundColor: 'var(--bg-elevated)',
-        borderColor:
-          apiKeyState.status === 'verified'
-            ? 'rgba(16, 185, 129, 0.35)'
-            : apiKeyState.status === 'invalid'
-              ? 'rgba(239, 68, 68, 0.4)'
-              : 'rgba(245, 158, 11, 0.35)',
-      }}
-    >
-      {/* Header + Live Status Indicator */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="rounded-2xl p-4 glass-card space-y-3.5">
+      {/* Header + Status */}
+      <div className="flex flex-wrap items-start justify-between gap-2.5">
         <div className="flex items-start gap-3 min-w-0">
-          <div
-            className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0"
-            style={{ backgroundColor: statusMeta.bg, color: statusMeta.color }}
-          >
-            <KeyRound className="h-5 w-5" />
+          <div className="h-9 w-9 rounded-xl bg-white/[0.06] border border-white/[0.08] flex items-center justify-center text-[var(--accent)] shrink-0">
+            <KeyRound className="h-4 w-4" />
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-                Personal Gemini / Google AI Studio API Key
+                Personal Gemini API Key
               </h3>
               <span
-                className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-md"
-                style={{ backgroundColor: statusMeta.bg, color: statusMeta.color }}
+                className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${statusMeta.pill}`}
               >
                 <span
                   className="h-1.5 w-1.5 rounded-full shrink-0"
-                  style={{ backgroundColor: statusMeta.color }}
+                  style={{ backgroundColor: statusMeta.dot }}
                 />
                 {statusMeta.label}
               </span>
             </div>
-            <p className="text-xs text-[var(--text-muted)] mt-0.5">
-              Stored privately on this device only. Reinitializes Voice &amp; Chat instantly without reload.
+            <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+              Saved privately on this device only. Updates Voice &amp; Chat immediately.
             </p>
           </div>
         </div>
 
         {apiKeyState.hasKey && !isEditing && (
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -163,33 +148,33 @@ export const GeminiApiKeyPanel: React.FC<GeminiApiKeyPanelProps> = ({
                 setConfirmClear(false);
                 setFeedback(null);
               }}
-              className="min-h-[38px] px-3.5 rounded-xl text-xs font-semibold bg-[var(--bg-surface)] border border-[var(--border-hairline)] text-[var(--text-primary)] hover:border-[var(--accent)] whitespace-nowrap cursor-pointer"
+              className="h-8 px-3 rounded-full glass-pill text-xs font-medium text-[var(--text-primary)] hover:bg-white/[0.12] cursor-pointer"
             >
-              Change Key
+              Change
             </button>
 
             {!confirmClear ? (
               <button
                 type="button"
                 onClick={() => setConfirmClear(true)}
-                className="min-h-[38px] px-3.5 rounded-xl text-xs font-semibold bg-[var(--bg-surface)] border border-[var(--border-hairline)] text-[var(--text-secondary)] hover:text-[var(--danger)] flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                className="h-8 px-3 rounded-full glass-pill text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--danger)] flex items-center gap-1 cursor-pointer"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                <span>Remove Key</span>
+                <span>Remove</span>
               </button>
             ) : (
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={handleClearKey}
-                  className="min-h-[38px] px-3 rounded-xl text-xs font-semibold bg-[var(--danger)] text-white whitespace-nowrap cursor-pointer"
+                  className="h-8 px-3 rounded-full bg-rose-500/20 border border-rose-400/35 text-xs font-semibold text-rose-200 cursor-pointer"
                 >
-                  Confirm Remove
+                  Confirm
                 </button>
                 <button
                   type="button"
                   onClick={() => setConfirmClear(false)}
-                  className="min-h-[38px] px-2.5 rounded-xl text-xs font-medium bg-[var(--bg-surface)] text-[var(--text-secondary)] whitespace-nowrap cursor-pointer"
+                  className="h-8 px-2.5 rounded-full glass-pill text-xs text-[var(--text-secondary)] cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -201,165 +186,140 @@ export const GeminiApiKeyPanel: React.FC<GeminiApiKeyPanelProps> = ({
 
       {/* Saved Key Summary */}
       {apiKeyState.hasKey && !isEditing && (
-        <div className="rounded-xl px-3.5 py-2.5 bg-[var(--bg-surface)] border border-[var(--border-hairline)] flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="rounded-xl px-3 py-2.5 bg-white/[0.04] border border-white/[0.07] flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2 font-mono-tabular text-[var(--text-primary)]">
-            <ShieldCheck className="h-4 w-4 text-[var(--success)] shrink-0" />
-            <span>Saved Key: {apiKeyState.maskedKey}</span>
+            <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+            <span>{apiKeyState.maskedKey}</span>
           </div>
           {apiKeyState.verifiedAt && (
-            <span className="text-[var(--text-muted)]">
+            <span className="text-[11px] text-[var(--text-muted)]">
               Verified {new Date(apiKeyState.verifiedAt).toLocaleDateString()}
-              {apiKeyState.modelCount ? ` · ${apiKeyState.modelCount} models ready` : ''}
+              {apiKeyState.modelCount ? ` · ${apiKeyState.modelCount} models` : ''}
             </span>
           )}
         </div>
       )}
 
       {apiKeyState.status === 'invalid' && apiKeyState.lastError && !feedback && (
-        <div
-          className="rounded-xl p-3 border text-xs flex items-start gap-2"
-          style={{
-            backgroundColor: 'var(--danger-soft)',
-            borderColor: 'var(--danger)',
-            color: 'var(--text-primary)',
-          }}
-        >
-          <AlertTriangle className="h-4 w-4 text-[var(--danger)] shrink-0 mt-0.5" />
+        <div className="rounded-xl p-3 bg-rose-500/12 border border-rose-400/30 text-xs text-rose-200 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
           <span>{apiKeyState.lastError}</span>
         </div>
       )}
 
       {/* Masked Key Input Form */}
       {isEditing && (
-        <form onSubmit={(e) => void handleTestAndSave(e)} className="space-y-3">
-          <div className="flex flex-col sm:flex-row gap-2">
-            <div className="relative flex-1">
-              <input
-                type={showKey ? 'text' : 'password'}
-                value={inputValue}
-                onChange={(e) => {
-                  setInputValue(e.target.value);
-                  setFeedback(null);
-                }}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="Paste your Google AI Studio API key (AIza...)"
-                aria-label="Gemini API Key"
-                className="w-full h-11 rounded-xl pl-3.5 pr-20 text-sm font-mono-tabular bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-hairline)] focus:outline-none focus:border-[var(--accent)]"
-              />
-              <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setShowKey((s) => !s)}
-                  aria-label={showKey ? 'Hide API key' : 'Show API key'}
-                  className="h-8 w-8 rounded-lg flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] cursor-pointer"
-                >
-                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handlePaste()}
-                  aria-label="Paste API key from clipboard"
-                  className="h-8 w-8 rounded-lg flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] cursor-pointer"
-                >
-                  <ClipboardPaste className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
+        <form onSubmit={(e) => void handleTestAndSave(e)} className="space-y-2.5">
+          <div className="relative">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={inputValue}
+              onChange={(e) => {
+                setInputValue(e.target.value);
+                setFeedback(null);
+              }}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Paste Google AI Studio key (AIza...)"
+              aria-label="Gemini API Key"
+              className="w-full h-10 rounded-xl pl-3.5 pr-20 text-xs font-mono-tabular bg-white/[0.05] text-[var(--text-primary)] border border-white/[0.09] focus:outline-none focus:border-cyan-400/45"
+            />
+            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
               <button
-                type="submit"
-                disabled={testing || !inputValue.trim()}
-                className="flex-1 sm:flex-none min-h-[44px] px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer disabled:opacity-55"
-                style={{
-                  backgroundColor: 'var(--accent)',
-                  color: 'var(--accent-contrast)',
-                }}
+                type="button"
+                onClick={() => setShowKey((s) => !s)}
+                aria-label={showKey ? 'Hide API key' : 'Show API key'}
+                className="h-7 w-7 rounded-lg flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
               >
-                <RefreshCw className={`h-3.5 w-3.5 ${testing ? 'animate-spin' : ''}`} />
-                <span>{testing ? 'Verifying...' : 'Test & Save Key'}</span>
+                {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
               </button>
-
-              {apiKeyState.hasKey && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsEditing(false);
-                    setInputValue('');
-                    setFeedback(null);
-                  }}
-                  className="min-h-[44px] px-3 rounded-xl text-xs font-medium bg-[var(--bg-surface)] border border-[var(--border-hairline)] text-[var(--text-secondary)] cursor-pointer"
-                >
-                  Cancel
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => void handlePaste()}
+                aria-label="Paste API key from clipboard"
+                className="h-7 w-7 rounded-lg flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+              >
+                <ClipboardPaste className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
 
-          <p className="text-[11px] text-[var(--text-muted)]">
-            Note: Your key is verified directly against <span className="font-mono-tabular">generativelanguage.googleapis.com</span> and saved locally on this device (never hardcoded or sent to third-party servers). Avoid sharing unlocked devices where local browser storage is accessible.
+          <div className="flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={testing || !inputValue.trim()}
+              className="h-9 px-4 rounded-full cta-aurora text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer disabled:opacity-45"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${testing ? 'animate-spin' : ''}`} />
+              <span>{testing ? 'Verifying...' : 'Test & Save Key'}</span>
+            </button>
+
+            {apiKeyState.hasKey && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditing(false);
+                  setInputValue('');
+                  setFeedback(null);
+                }}
+                className="h-9 px-3 rounded-full glass-pill text-xs text-[var(--text-secondary)] cursor-pointer"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+
+          <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+            Verified directly with <span className="font-mono-tabular">generativelanguage.googleapis.com</span> from your browser. Never sent to any third-party server.
           </p>
         </form>
       )}
 
-      {/* Verification Feedback */}
       {feedback && (
         <div
-          className="rounded-xl p-3 border text-xs flex items-start gap-2"
-          style={{
-            backgroundColor:
-              feedback.kind === 'success' ? 'var(--success-soft)' : 'var(--danger-soft)',
-            borderColor: feedback.kind === 'success' ? 'var(--success)' : 'var(--danger)',
-            color: 'var(--text-primary)',
-          }}
+          className={`rounded-xl p-3 border text-xs flex items-start gap-2 ${
+            feedback.kind === 'success'
+              ? 'bg-emerald-500/12 border-emerald-400/30 text-emerald-200'
+              : 'bg-rose-500/12 border-rose-400/30 text-rose-200'
+          }`}
         >
           {feedback.kind === 'success' ? (
-            <CheckCircle2 className="h-4 w-4 text-[var(--success)] shrink-0 mt-0.5" />
+            <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
           ) : (
-            <AlertTriangle className="h-4 w-4 text-[var(--danger)] shrink-0 mt-0.5" />
+            <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
           )}
           <span>{feedback.text}</span>
         </div>
       )}
 
       {/* Collapsible Quick Setup Guide */}
-      <div className="pt-2 border-t border-[var(--border-hairline)]">
+      <div className="pt-2 border-t border-white/[0.06]">
         <button
           type="button"
           onClick={() => setShowGuide((v) => !v)}
-          className="w-full min-h-[38px] flex items-center justify-between text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+          className="w-full h-8 flex items-center justify-between text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
         >
-          <span>How to get a free Gemini API Key (30 seconds)</span>
-          {showGuide ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          <span>How to get a free Gemini API Key</span>
+          {showGuide ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </button>
 
         {showGuide && (
-          <div className="mt-2 rounded-xl p-3.5 bg-[var(--bg-surface)] border border-[var(--border-hairline)] space-y-3 text-xs text-[var(--text-secondary)]">
-            <ol className="list-decimal list-inside space-y-1.5 leading-relaxed">
+          <div className="mt-2 rounded-xl p-3 bg-white/[0.03] border border-white/[0.06] space-y-2.5 text-xs text-[var(--text-secondary)]">
+            <ol className="list-decimal list-inside space-y-1 leading-relaxed text-[11px]">
+              <li>Open Google AI Studio and sign in with Google.</li>
               <li>
-                Open Google AI Studio and sign in with your Google account.
+                Click <strong className="text-[var(--text-primary)]">Create API Key</strong> and copy the key (<span className="font-mono-tabular">AIza...</span>).
               </li>
-              <li>
-                Click <strong className="text-[var(--text-primary)]">Create API Key</strong> and copy the key starting with <span className="font-mono-tabular">AIza...</span>.
-              </li>
-              <li>
-                Paste it above and tap <strong className="text-[var(--text-primary)]">Test &amp; Save Key</strong>. Gwen activates immediately!
-              </li>
+              <li>Paste above and tap Test &amp; Save.</li>
             </ol>
             <a
               href="https://aistudio.google.com/apikey"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex min-h-[38px] px-3.5 rounded-xl text-xs font-semibold items-center gap-1.5 border transition-colors"
-              style={{
-                backgroundColor: 'var(--accent-soft)',
-                borderColor: 'var(--accent-ring)',
-                color: 'var(--accent)',
-              }}
+              className="inline-flex h-8 px-3 rounded-full glass-pill text-[11px] font-semibold items-center gap-1.5 text-[var(--accent)] hover:bg-white/[0.11]"
             >
-              <span>Get Free Key at Google AI Studio</span>
-              <ExternalLink className="h-3.5 w-3.5" />
+              <span>Open Google AI Studio</span>
+              <ExternalLink className="h-3 w-3" />
             </a>
           </div>
         )}

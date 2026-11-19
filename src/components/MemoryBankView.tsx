@@ -2,13 +2,15 @@ import React, { useMemo, useRef, useState } from 'react';
 import {
   Camera,
   Check,
+  ChevronDown,
+  ChevronUp,
+  Clock,
   EyeOff,
   Lock,
   Mic,
   Pencil,
   Pin,
   PinOff,
-  Plus,
   Search,
   Trash2,
   UserCheck,
@@ -59,6 +61,25 @@ const CATEGORIES: MemoryCategory[] = [
   'Custom Notes',
 ];
 
+const CATEGORY_CHIP_LABELS: Record<'All' | MemoryCategory, string> = {
+  All: 'All',
+  Preferences: 'Preferences',
+  'Personal Context': 'Personal',
+  Routines: 'Routines',
+  Projects: 'Projects',
+  'Micro-Detail': 'Details',
+  'Custom Notes': 'Notes',
+};
+
+const CATEGORY_DOT_COLORS: Record<MemoryCategory, string> = {
+  Preferences: '#22d3ee',
+  'Personal Context': '#a78bfa',
+  Routines: '#34d399',
+  Projects: '#fbbf24',
+  'Micro-Detail': '#38bdf8',
+  'Custom Notes': '#f472b6',
+};
+
 export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
   memories,
   identityCore,
@@ -76,9 +97,9 @@ export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<'All' | MemoryCategory>('All');
   const [newContent, setNewContent] = useState('');
   const [newCategory, setNewCategory] = useState<MemoryCategory>('Preferences');
-  const [newPinned, setNewPinned] = useState(false);
   const [newPermanent, setNewPermanent] = useState(true);
 
+  const [identityExpanded, setIdentityExpanded] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [editCategory, setEditCategory] = useState<MemoryCategory>('Preferences');
@@ -115,10 +136,10 @@ export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
       });
   }, [memories, search, selectedCategory]);
 
-  // On-Device Voiceprint Enrollment (3-second local spectral signature)
+  // On-Device Voiceprint Enrollment
   const startVoiceEnrollment = async () => {
     setEnrollingVoice(true);
-    setVoiceEnrollStatus('Listening for 3 seconds — say: "Hey Gwen, it’s me — remember my voice."');
+    setVoiceEnrollStatus('Listening 3s — say: "Hey Gwen, it’s me — remember my voice."');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const ctx = new AudioContext();
@@ -155,13 +176,12 @@ export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
       });
       setVoiceEnrollStatus('Voiceprint saved securely on this device.');
     } catch {
-      setVoiceEnrollStatus('Microphone permission is required to enroll your voiceprint.');
+      setVoiceEnrollStatus('Microphone permission required to enroll voiceprint.');
     } finally {
       setEnrollingVoice(false);
     }
   };
 
-  // On-Device Face Enrollment (Camera capture + local histogram + visual descriptor)
   const openFaceCamera = async () => {
     setFaceEnrollStatus(null);
     setEnrollingFace(true);
@@ -179,7 +199,7 @@ export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
       }, 80);
     } catch {
       setEnrollingFace(false);
-      setFaceEnrollStatus('Camera permission is required to enroll your face profile.');
+      setFaceEnrollStatus('Camera permission required to enroll face profile.');
     }
   };
 
@@ -206,13 +226,12 @@ export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
       const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
       const histogram = extractFaceHistogram(canvas);
 
-      // Extract concise visual trait summary directly via browser Gemini Vision
       let visualSummary = identityCore.visualTraits || 'Primary user enrolled on-device.';
       try {
         const desc = await describeGwenAppearance(dataUrl);
         if (desc) visualSummary = desc;
       } catch {
-        // Keep local descriptor if offline or unconfigured
+        // Keep local descriptor
       }
 
       onSetFaceProfile({
@@ -226,7 +245,7 @@ export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
       if (!identityCore.visualTraits) {
         onUpdateIdentityCore({ visualTraits: visualSummary });
       }
-      setFaceEnrollStatus('Face profile & visual descriptors saved on-device.');
+      setFaceEnrollStatus('Face profile saved on-device.');
       closeFaceCamera();
     } finally {
       setFaceEnrollBusy(false);
@@ -236,9 +255,8 @@ export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newContent.trim()) return;
-    onAddMemory(newContent.trim(), newCategory, 'manual', newPinned, newPermanent);
+    onAddMemory(newContent.trim(), newCategory, 'manual', false, newPermanent);
     setNewContent('');
-    setNewPinned(false);
   };
 
   const beginEdit = (item: MemoryItem) => {
@@ -256,42 +274,29 @@ export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
     setEditingId(null);
   };
 
-  const permanentCount = memories.filter((m) => m.isPermanent).length;
+  const userNameLabel =
+    identityCore.displayName || settings.deviceUserName || IMMUTABLE_DEVELOPER_NAME;
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      {/* Header & Privacy Controls */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight text-[var(--text-primary)]">
-            Permanent Memory Core
-          </h1>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            <span className="font-mono-tabular">{memories.length}</span> facts
-            <span className="mx-2" aria-hidden="true">·</span>
-            <span className="font-mono-tabular">{permanentCount}</span> permanent
-            <span className="mx-2" aria-hidden="true">·</span>
-            <span>
-              {settings.incognitoMode
-                ? 'Incognito active (memory core paused)'
-                : 'Stored locally & injected into every session'}
-            </span>
-          </p>
-        </div>
+    <div className="mx-auto w-full max-w-5xl px-4 sm:px-6 lg:px-8 pt-5 pb-6 space-y-3.5">
+      {/* Focused Header: Memory Core + Incognito & Auto-Capture Status Pills */}
+      <header className="flex flex-wrap items-center justify-between gap-2.5">
+        <h1 className="font-display text-xl sm:text-2xl font-semibold tracking-tight text-[var(--text-primary)]">
+          Memory Core
+        </h1>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => onUpdateSettings({ incognitoMode: !settings.incognitoMode })}
-            className="min-h-[44px] px-4 rounded-xl text-xs font-semibold flex items-center gap-2 border transition-colors whitespace-nowrap cursor-pointer"
-            style={{
-              backgroundColor: settings.incognitoMode ? 'var(--warning-soft)' : 'var(--bg-surface)',
-              borderColor: settings.incognitoMode ? 'var(--warning)' : 'var(--border-hairline)',
-              color: settings.incognitoMode ? 'var(--warning)' : 'var(--text-primary)',
-            }}
+            className={`h-8 px-3 rounded-full text-[11px] font-medium flex items-center gap-1.5 border transition-colors whitespace-nowrap cursor-pointer ${
+              settings.incognitoMode
+                ? 'bg-amber-400/15 border-amber-400/35 text-amber-300'
+                : 'glass-pill text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+            }`}
           >
-            <EyeOff className="h-4 w-4" />
-            <span>{settings.incognitoMode ? 'Incognito On' : 'Incognito Off'}</span>
+            <EyeOff className="h-3.5 w-3.5" />
+            <span>Incognito</span>
           </button>
 
           <button
@@ -299,385 +304,36 @@ export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
             onClick={() =>
               onUpdateSettings({ autoExtractMemories: !settings.autoExtractMemories })
             }
-            className="min-h-[44px] px-4 rounded-xl text-xs font-semibold flex items-center gap-2 border transition-colors whitespace-nowrap cursor-pointer"
-            style={{
-              backgroundColor: settings.autoExtractMemories
-                ? 'var(--accent-soft)'
-                : 'var(--bg-surface)',
-              borderColor: settings.autoExtractMemories
-                ? 'var(--accent)'
-                : 'var(--border-hairline)',
-              color: settings.autoExtractMemories ? 'var(--accent)' : 'var(--text-secondary)',
-            }}
+            className={`h-8 px-3 rounded-full text-[11px] font-medium flex items-center gap-1.5 border transition-colors whitespace-nowrap cursor-pointer ${
+              settings.autoExtractMemories
+                ? 'bg-cyan-400/14 border-cyan-400/35 text-[var(--accent)]'
+                : 'glass-pill text-[var(--text-secondary)]'
+            }`}
           >
-            <span>Auto-Capture: {settings.autoExtractMemories ? 'Enabled' : 'Paused'}</span>
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                settings.autoExtractMemories ? 'bg-cyan-400' : 'bg-white/25'
+              }`}
+            />
+            <span>Auto-Capture</span>
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Immutable Developer Core + Continuous Local Session Continuity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <section
-          className="rounded-3xl p-5 border space-y-2.5"
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            borderColor: 'var(--accent-ring)',
-          }}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="font-display text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
-              <Lock className="h-4 w-4 text-[var(--accent)]" />
-              <span>Immutable Creator &amp; Origin Story</span>
-            </h2>
-            <span className="text-[11px] font-mono-tabular text-[var(--accent)]">LOCKED</span>
-          </div>
-          <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-            Sole Developer &amp; Main User: <strong className="text-[var(--text-primary)]">{IMMUTABLE_DEVELOPER_NAME}</strong> (permanently locked across all devices).
-          </p>
-          <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-            {IMMUTABLE_ORIGIN_STORY}
-          </p>
-        </section>
-
-        <section
-          className="rounded-3xl p-5 border space-y-2.5"
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            borderColor: 'var(--border-hairline)',
-          }}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="font-display text-base font-semibold text-[var(--text-primary)]">
-              Zero-Forgetfulness Session Continuity
-            </h2>
-            <span className="text-[11px] font-mono-tabular text-[var(--text-muted)]">
-              {sessionState.totalArchivedTurns} turns stored
-            </span>
-          </div>
-          <p className="text-xs text-[var(--text-primary)] font-medium">
-            Last-Left Topic: <span className="text-[var(--accent)]">{sessionState.lastLeftTopic}</span>
-          </p>
-          <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-            {sessionState.lastSummary}
-          </p>
-          {sessionState.unfinishedThreads.length > 0 && (
-            <p className="text-[11px] text-[var(--text-muted)]">
-              Open threads: {sessionState.unfinishedThreads.join(' · ')}
-            </p>
-          )}
-        </section>
-      </div>
-
-      {/* Permanent Identity Core: Personal Profile + Voiceprint + Face Biometrics */}
-      <section
-        className="rounded-3xl p-5 sm:p-6 border space-y-5"
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          borderColor: 'var(--accent-ring)',
-        }}
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h2 className="font-display text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2">
-              <UserCheck className="h-5 w-5 text-[var(--accent)]" />
-              <span>Current Device User &amp; Identity Core (On-Device)</span>
-            </h2>
-            <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-              Personalize how Gwen addresses you on this device, plus on-device Voiceprint &amp; Face recognition.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={settings.deviceUserName}
-              onChange={(e) => onUpdateSettings({ deviceUserName: e.target.value })}
-              placeholder="Current device user name"
-              className="h-10 rounded-xl px-3 text-xs bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-hairline)] focus:outline-none focus:border-[var(--accent)]"
-            />
-          </div>
-        </div>
-
-        {/* Personal Identity Fields */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
-              Your Name
-            </label>
-            <input
-              type="text"
-              value={identityCore.displayName}
-              onChange={(e) => onUpdateIdentityCore({ displayName: e.target.value })}
-              placeholder="e.g. Syed Farhan"
-              className="w-full h-11 rounded-xl px-3.5 text-sm bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-hairline)] focus:outline-none focus:border-[var(--accent)]"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
-              Preferred Nickname
-            </label>
-            <input
-              type="text"
-              value={identityCore.nickname}
-              onChange={(e) => onUpdateIdentityCore({ nickname: e.target.value })}
-              placeholder="What Gwen calls you"
-              className="w-full h-11 rounded-xl px-3.5 text-sm bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-hairline)] focus:outline-none focus:border-[var(--accent)]"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
-              Birthday
-            </label>
-            <input
-              type="text"
-              value={identityCore.birthday}
-              onChange={(e) => onUpdateIdentityCore({ birthday: e.target.value })}
-              placeholder="e.g. October 14"
-              className="w-full h-11 rounded-xl px-3.5 text-sm bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-hairline)] focus:outline-none focus:border-[var(--accent)]"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
-              Visual Traits &amp; Style
-            </label>
-            <input
-              type="text"
-              value={identityCore.visualTraits}
-              onChange={(e) => onUpdateIdentityCore({ visualTraits: e.target.value })}
-              placeholder="e.g. Glasses, dark hoodie"
-              className="w-full h-11 rounded-xl px-3.5 text-sm bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-hairline)] focus:outline-none focus:border-[var(--accent)]"
-            />
-          </div>
-        </div>
-
-        {/* Voiceprint & Face Enrollment Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Voiceprint Card */}
-          <div className="rounded-2xl p-4 bg-[var(--bg-elevated)] border border-[var(--border-hairline)] flex flex-col justify-between gap-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-1.5">
-                  <Mic className="h-4 w-4 text-[var(--accent)]" />
-                  <span>Voiceprint Profile</span>
-                </h3>
-                <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                  {identityCore.voiceprint?.enrolled
-                    ? `Enrolled on-device · ${new Date(identityCore.voiceprint.enrolledAt).toLocaleDateString()}`
-                    : 'Not enrolled yet — capture a 3s local acoustic signature.'}
-                </p>
-              </div>
-              {identityCore.voiceprint?.enrolled && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSetVoiceprint(null);
-                    setVoiceEnrollStatus('Voiceprint wiped from device.');
-                  }}
-                  className="min-h-[34px] px-2.5 rounded-lg text-xs text-[var(--danger)] hover:bg-black/10 cursor-pointer"
-                >
-                  Wipe
-                </button>
-              )}
-            </div>
-
-            {voiceEnrollStatus && (
-              <p className="text-xs text-[var(--accent)]">{voiceEnrollStatus}</p>
-            )}
-
-            <button
-              type="button"
-              onClick={() => void startVoiceEnrollment()}
-              disabled={enrollingVoice}
-              className="min-h-[42px] px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-opacity hover:opacity-90 disabled:opacity-60 cursor-pointer"
-              style={{
-                backgroundColor: identityCore.voiceprint?.enrolled
-                  ? 'var(--bg-surface)'
-                  : 'var(--accent)',
-                color: identityCore.voiceprint?.enrolled
-                  ? 'var(--text-primary)'
-                  : 'var(--accent-contrast)',
-                border: '1px solid var(--border-hairline)',
-              }}
-            >
-              <Mic className="h-3.5 w-3.5" />
-              <span>
-                {enrollingVoice
-                  ? 'Sampling Voice (3s)...'
-                  : identityCore.voiceprint?.enrolled
-                    ? 'Re-Enroll My Voice'
-                    : 'Enroll My Voice'}
-              </span>
-            </button>
-          </div>
-
-          {/* Face Profile Card */}
-          <div className="rounded-2xl p-4 bg-[var(--bg-elevated)] border border-[var(--border-hairline)] flex flex-col justify-between gap-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                {identityCore.faceProfile?.thumbnailDataUrl && (
-                  <img
-                    src={identityCore.faceProfile.thumbnailDataUrl}
-                    alt="Enrolled face profile"
-                    className="h-12 w-12 rounded-xl object-cover border border-[var(--accent)] shrink-0"
-                  />
-                )}
-                <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-1.5">
-                    <Camera className="h-4 w-4 text-[var(--accent)]" />
-                    <span>Face &amp; Visual Profile</span>
-                  </h3>
-                  <p className="text-xs text-[var(--text-muted)] mt-0.5 truncate">
-                    {identityCore.faceProfile?.enrolled
-                      ? identityCore.faceProfile.visualSummary
-                      : 'Not enrolled yet — lets Gwen recognize you on Camera Vision.'}
-                  </p>
-                </div>
-              </div>
-              {identityCore.faceProfile?.enrolled && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSetFaceProfile(null);
-                    setFaceEnrollStatus('Face profile wiped from device.');
-                  }}
-                  className="min-h-[34px] px-2.5 rounded-lg text-xs text-[var(--danger)] hover:bg-black/10 shrink-0 cursor-pointer"
-                >
-                  Wipe
-                </button>
-              )}
-            </div>
-
-            {enrollingFace && (
-              <div className="space-y-2">
-                <video
-                  ref={faceVideoRef}
-                  muted
-                  playsInline
-                  className="w-full h-40 rounded-xl object-cover bg-black border border-[var(--accent)]"
-                />
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void captureFaceEnrollment()}
-                    disabled={faceEnrollBusy}
-                    className="flex-1 min-h-[40px] rounded-xl text-xs font-semibold cursor-pointer"
-                    style={{
-                      backgroundColor: 'var(--accent)',
-                      color: 'var(--accent-contrast)',
-                    }}
-                  >
-                    {faceEnrollBusy ? 'Analyzing Features...' : 'Capture & Save Face'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={closeFaceCamera}
-                    className="min-h-[40px] px-3 rounded-xl text-xs bg-[var(--bg-surface)] text-[var(--text-secondary)] cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {faceEnrollStatus && (
-              <p className="text-xs text-[var(--accent)]">{faceEnrollStatus}</p>
-            )}
-
-            {!enrollingFace && (
-              <button
-                type="button"
-                onClick={() => void openFaceCamera()}
-                className="min-h-[42px] px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-opacity hover:opacity-90 cursor-pointer"
-                style={{
-                  backgroundColor: identityCore.faceProfile?.enrolled
-                    ? 'var(--bg-surface)'
-                    : 'var(--accent)',
-                  color: identityCore.faceProfile?.enrolled
-                    ? 'var(--text-primary)'
-                    : 'var(--accent-contrast)',
-                  border: '1px solid var(--border-hairline)',
-                }}
-              >
-                <Camera className="h-3.5 w-3.5" />
-                <span>
-                  {identityCore.faceProfile?.enrolled ? 'Re-Enroll My Face' : 'Enroll My Face'}
-                </span>
-              </button>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* Add Permanent Memory Composer */}
-      <form
-        onSubmit={handleAdd}
-        className="rounded-3xl p-5 border space-y-3"
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          borderColor: 'var(--border-hairline)',
-        }}
-      >
-        <div className="flex flex-col sm:flex-row gap-3">
-          <input
-            type="text"
-            value={newContent}
-            onChange={(e) => setNewContent(e.target.value)}
-            placeholder='Add a permanent memory (or tell Gwen "Remember permanently that...")'
-            className="flex-1 h-12 rounded-2xl px-4 text-sm bg-[var(--bg-elevated)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] border border-[var(--border-hairline)] focus:outline-none focus:border-[var(--accent)]"
-          />
-          <select
-            value={newCategory}
-            onChange={(e) => setNewCategory(e.target.value as MemoryCategory)}
-            aria-label="Memory category"
-            className="h-12 rounded-2xl px-3.5 text-sm bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-hairline)] focus:outline-none focus:border-[var(--accent)] cursor-pointer"
-          >
-            {CATEGORIES.map((cat) => (
-              <option key={cat} value={cat}>
-                {cat}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => setNewPermanent((p) => !p)}
-            className="h-12 px-3.5 rounded-2xl text-xs font-medium flex items-center justify-center gap-1.5 border transition-colors whitespace-nowrap cursor-pointer"
-            style={{
-              backgroundColor: newPermanent ? 'var(--accent-soft)' : 'var(--bg-elevated)',
-              borderColor: newPermanent ? 'var(--accent)' : 'var(--border-hairline)',
-              color: newPermanent ? 'var(--accent)' : 'var(--text-secondary)',
-            }}
-          >
-            <Lock className="h-3.5 w-3.5" />
-            <span>{newPermanent ? 'Permanent' : 'Standard'}</span>
-          </button>
-          <button
-            type="submit"
-            disabled={!newContent.trim()}
-            className="h-12 px-5 rounded-2xl text-sm font-semibold flex items-center justify-center gap-2 transition-opacity hover:opacity-90 disabled:opacity-45 whitespace-nowrap cursor-pointer"
-            style={{
-              backgroundColor: 'var(--accent)',
-              color: 'var(--accent-contrast)',
-            }}
-          >
-            <Plus className="h-4 w-4" />
-            <span>Save</span>
-          </button>
-        </div>
-      </form>
-
-      {/* Search & Category Filters */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-        <div className="relative w-full lg:max-w-sm">
+      {/* Search + Horizontally Scrollable Filter Chips */}
+      <div className="space-y-2.5">
+        <div className="relative">
           <Search className="h-4 w-4 text-[var(--text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search Permanent Memory Core..."
-            className="w-full h-11 rounded-xl pl-10 pr-4 text-sm bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] border border-[var(--border-hairline)] focus:outline-none focus:border-[var(--accent)]"
+            placeholder="Search memories..."
+            className="w-full h-10 rounded-full pl-10 pr-4 text-xs sm:text-[13px] glass-card text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-cyan-400/45"
           />
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar pr-6">
           {(['All', ...CATEGORIES] as const).map((cat) => {
             const active = selectedCategory === cat;
             return (
@@ -685,174 +341,470 @@ export const MemoryBankView: React.FC<MemoryBankViewProps> = ({
                 key={cat}
                 type="button"
                 onClick={() => setSelectedCategory(cat)}
-                className="min-h-[40px] px-3.5 rounded-xl text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                style={{
-                  backgroundColor: active ? 'var(--accent)' : 'var(--bg-surface)',
-                  color: active ? 'var(--accent-contrast)' : 'var(--text-secondary)',
-                  border: active ? '1px solid transparent' : '1px solid var(--border-hairline)',
-                }}
+                className={`h-8 px-3.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all whitespace-nowrap shrink-0 cursor-pointer border ${
+                  active
+                    ? 'bg-cyan-400/15 border-cyan-400/40 text-[var(--text-primary)]'
+                    : 'glass-card text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
               >
-                {cat}
+                <span>{CATEGORY_CHIP_LABELS[cat]}</span>
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Memory Cards List */}
-      {filteredMemories.length === 0 ? (
-        <div
-          className="rounded-3xl p-10 text-center border"
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            borderColor: 'var(--border-hairline)',
-          }}
-        >
-          <p className="text-base font-medium text-[var(--text-primary)]">
-            No matching memories found
-          </p>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Add a permanent fact above or tell Gwen &ldquo;Remember that...&rdquo; during a conversation.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filteredMemories.map((item) => {
-            const isEditing = editingId === item.id;
-            const dateStr = new Date(item.updatedAt).toLocaleDateString([], {
-              month: 'short',
-              day: 'numeric',
-            });
+      {/* Compact Core Cards (Creator · Current User & Biometrics · Last-Left Context) */}
+      <div className="space-y-2.5">
+        {/* 1. Creator Card — Locked Syed Farhan · Ben 10 Origin */}
+        <section className="rounded-2xl p-3.5 glass-card flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
+            <span className="h-9 w-9 rounded-xl bg-cyan-400/12 border border-cyan-400/25 flex items-center justify-center text-[var(--accent)] shrink-0 mt-0.5">
+              <Lock className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                  {IMMUTABLE_DEVELOPER_NAME} · Ben 10 Origin
+                </h2>
+                <span className="text-[10px] font-mono-tabular text-[var(--accent)]">
+                  Immutable Creator
+                </span>
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)] leading-relaxed line-clamp-2 mt-0.5">
+                {IMMUTABLE_ORIGIN_STORY}
+              </p>
+            </div>
+          </div>
+        </section>
 
-            return (
-              <article
-                key={item.id}
-                className="rounded-2xl p-5 border flex flex-col justify-between gap-4 transition-colors"
-                style={{
-                  backgroundColor: 'var(--bg-surface)',
-                  borderColor: item.isPermanent
-                    ? 'var(--accent-ring)'
-                    : 'var(--border-hairline)',
-                }}
-              >
-                {isEditing ? (
-                  <div className="space-y-3">
-                    <textarea
-                      value={editContent}
-                      onChange={(e) => setEditContent(e.target.value)}
-                      rows={3}
-                      className="w-full rounded-xl p-3 text-sm bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-hairline)] focus:outline-none focus:border-[var(--accent)]"
-                    />
-                    <div className="flex items-center justify-between gap-2">
-                      <select
-                        value={editCategory}
-                        onChange={(e) => setEditCategory(e.target.value as MemoryCategory)}
-                        className="h-10 rounded-xl px-3 text-xs bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-hairline)]"
+        {/* 2. Current User & Biometrics Card (Expandable on tap) */}
+        <section className="rounded-2xl glass-card overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setIdentityExpanded((v) => !v)}
+            className="w-full p-3.5 flex items-center justify-between gap-3 text-left hover:bg-white/[0.03] transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="h-9 w-9 rounded-xl bg-violet-500/14 border border-violet-400/25 flex items-center justify-center text-violet-300 shrink-0">
+                <UserCheck className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
+                  {userNameLabel}
+                  {identityCore.nickname ? ` (${identityCore.nickname})` : ''}
+                </h2>
+                <p className="text-[11px] text-[var(--text-muted)] truncate mt-0.5">
+                  {identityCore.birthday ? `Bday: ${identityCore.birthday} · ` : ''}
+                  {identityCore.voiceprint?.enrolled ? 'Voice enrolled' : 'Voiceprint'} ·{' '}
+                  {identityCore.faceProfile?.enrolled ? 'Face enrolled' : 'Face Profile'}
+                </p>
+              </div>
+            </div>
+            {identityExpanded ? (
+              <ChevronUp className="h-4 w-4 text-[var(--text-muted)] shrink-0" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-[var(--text-muted)] shrink-0" />
+            )}
+          </button>
+
+          {identityExpanded && (
+            <div className="px-3.5 pb-4 pt-1 border-t border-white/[0.08] space-y-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    value={identityCore.displayName}
+                    onChange={(e) => onUpdateIdentityCore({ displayName: e.target.value })}
+                    placeholder="e.g. Syed Farhan"
+                    className="w-full h-9 rounded-xl px-3 text-xs bg-white/[0.05] text-[var(--text-primary)] border border-white/[0.1] focus:outline-none focus:border-cyan-400/45"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">
+                    Nickname
+                  </label>
+                  <input
+                    type="text"
+                    value={identityCore.nickname}
+                    onChange={(e) => onUpdateIdentityCore({ nickname: e.target.value })}
+                    placeholder="What Gwen calls you"
+                    className="w-full h-9 rounded-xl px-3 text-xs bg-white/[0.05] text-[var(--text-primary)] border border-white/[0.1] focus:outline-none focus:border-cyan-400/45"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">
+                    Birthday
+                  </label>
+                  <input
+                    type="text"
+                    value={identityCore.birthday}
+                    onChange={(e) => onUpdateIdentityCore({ birthday: e.target.value })}
+                    placeholder="e.g. October 14"
+                    className="w-full h-9 rounded-xl px-3 text-xs bg-white/[0.05] text-[var(--text-primary)] border border-white/[0.1] focus:outline-none focus:border-cyan-400/45"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">
+                    Visual Traits
+                  </label>
+                  <input
+                    type="text"
+                    value={identityCore.visualTraits}
+                    onChange={(e) => onUpdateIdentityCore({ visualTraits: e.target.value })}
+                    placeholder="e.g. Glasses, dark hoodie"
+                    className="w-full h-9 rounded-xl px-3 text-xs bg-white/[0.05] text-[var(--text-primary)] border border-white/[0.1] focus:outline-none focus:border-cyan-400/45"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {/* Voiceprint */}
+                <div className="rounded-xl p-3 bg-white/[0.035] border border-white/[0.08] space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-xs font-semibold text-[var(--text-primary)] flex items-center gap-1.5">
+                        <Mic className="h-3.5 w-3.5 text-[var(--accent)]" />
+                        <span>Voiceprint Profile</span>
+                      </h3>
+                      <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                        {identityCore.voiceprint?.enrolled
+                          ? `Enrolled ${new Date(identityCore.voiceprint.enrolledAt).toLocaleDateString()}`
+                          : '3-second local acoustic signature'}
+                      </p>
+                    </div>
+                    {identityCore.voiceprint?.enrolled && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSetVoiceprint(null);
+                          setVoiceEnrollStatus('Voiceprint wiped.');
+                        }}
+                        className="text-[11px] text-[var(--danger)] hover:underline cursor-pointer"
                       >
-                        {CATEGORIES.map((cat) => (
-                          <option key={cat} value={cat}>
-                            {cat}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setEditingId(null)}
-                          className="h-10 px-3 rounded-xl text-xs font-medium bg-[var(--bg-elevated)] text-[var(--text-secondary)] cursor-pointer"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={commitEdit}
-                          className="h-10 px-3.5 rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                          style={{
-                            backgroundColor: 'var(--accent)',
-                            color: 'var(--accent-contrast)',
-                          }}
-                        >
-                          <Check className="h-4 w-4" />
-                          <span>Save</span>
-                        </button>
-                      </div>
-                    </div>
+                        Wipe
+                      </button>
+                    )}
                   </div>
-                ) : (
-                  <>
-                    <p className="text-sm sm:text-[15px] leading-relaxed text-[var(--text-primary)]">
-                      {item.content}
-                    </p>
+                  {voiceEnrollStatus && (
+                    <p className="text-[11px] text-[var(--accent)]">{voiceEnrollStatus}</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void startVoiceEnrollment()}
+                    disabled={enrollingVoice}
+                    className="h-9 px-3.5 rounded-full glass-pill text-xs font-medium text-[var(--text-primary)] hover:bg-white/[0.12] flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Mic className="h-3.5 w-3.5 text-[var(--accent)]" />
+                    <span>
+                      {enrollingVoice
+                        ? 'Sampling (3s)...'
+                        : identityCore.voiceprint?.enrolled
+                          ? 'Re-Enroll Voice'
+                          : 'Enroll Voiceprint'}
+                    </span>
+                  </button>
+                </div>
 
-                    <div className="flex items-center justify-between gap-2 pt-3 border-t border-[var(--border-hairline)]">
-                      <div className="text-xs text-[var(--text-muted)] flex items-center gap-1.5 truncate">
-                        <span className="text-[var(--text-secondary)] font-medium">
-                          {item.category}
-                        </span>
-                        {item.isPermanent && (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span className="text-[var(--accent)] font-medium">Permanent</span>
-                          </>
-                        )}
-                        {item.pinned && (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span>Pinned</span>
-                          </>
-                        )}
-                        <span aria-hidden="true">·</span>
-                        <span className="font-mono-tabular">{dateStr}</span>
+                {/* Face Profile */}
+                <div className="rounded-xl p-3 bg-white/[0.035] border border-white/[0.08] space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {identityCore.faceProfile?.thumbnailDataUrl && (
+                        <img
+                          src={identityCore.faceProfile.thumbnailDataUrl}
+                          alt="Enrolled face"
+                          className="h-10 w-10 rounded-xl object-cover border border-cyan-400/40 shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <h3 className="text-xs font-semibold text-[var(--text-primary)] flex items-center gap-1.5">
+                          <Camera className="h-3.5 w-3.5 text-violet-400" />
+                          <span>Face Profile</span>
+                        </h3>
+                        <p className="text-[11px] text-[var(--text-muted)] truncate mt-0.5">
+                          {identityCore.faceProfile?.enrolled
+                            ? identityCore.faceProfile.visualSummary
+                            : 'Recognize you on Camera Vision'}
+                        </p>
                       </div>
+                    </div>
+                    {identityCore.faceProfile?.enrolled && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSetFaceProfile(null);
+                          setFaceEnrollStatus('Face profile wiped.');
+                        }}
+                        className="text-[11px] text-[var(--danger)] hover:underline shrink-0 cursor-pointer"
+                      >
+                        Wipe
+                      </button>
+                    )}
+                  </div>
 
-                      <div className="flex items-center gap-1 shrink-0">
+                  {enrollingFace && (
+                    <div className="space-y-2">
+                      <video
+                        ref={faceVideoRef}
+                        muted
+                        playsInline
+                        className="w-full h-36 rounded-xl object-cover bg-black border border-cyan-400/40"
+                      />
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() =>
-                            onUpdateMemory(item.id, { isPermanent: !item.isPermanent })
-                          }
-                          aria-label={item.isPermanent ? 'Mark non-permanent' : 'Mark permanent'}
-                          title={item.isPermanent ? 'Permanent Core Fact' : 'Promote to Permanent Core'}
-                          className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl hover:bg-[var(--bg-elevated)] transition-colors cursor-pointer"
-                          style={{
-                            color: item.isPermanent ? 'var(--accent)' : 'var(--text-muted)',
-                          }}
+                          onClick={() => void captureFaceEnrollment()}
+                          disabled={faceEnrollBusy}
+                          className="flex-1 h-9 rounded-full cta-aurora text-xs font-semibold cursor-pointer"
                         >
-                          <Lock className="h-3.5 w-3.5" />
+                          {faceEnrollBusy ? 'Analyzing...' : 'Capture & Save'}
                         </button>
                         <button
                           type="button"
-                          onClick={() => onUpdateMemory(item.id, { pinned: !item.pinned })}
-                          aria-label={item.pinned ? 'Unpin memory' : 'Pin memory'}
-                          className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-elevated)] transition-colors cursor-pointer"
+                          onClick={closeFaceCamera}
+                          className="h-9 px-3 rounded-full glass-pill text-xs text-[var(--text-secondary)] cursor-pointer"
                         >
-                          {item.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => beginEdit(item)}
-                          aria-label="Edit memory"
-                          className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] transition-colors cursor-pointer"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onDeleteMemory(item.id)}
-                          aria-label="Delete memory"
-                          className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[var(--bg-elevated)] transition-colors cursor-pointer"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          Cancel
                         </button>
                       </div>
                     </div>
-                  </>
-                )}
-              </article>
-            );
-          })}
+                  )}
+
+                  {faceEnrollStatus && (
+                    <p className="text-[11px] text-[var(--accent)]">{faceEnrollStatus}</p>
+                  )}
+
+                  {!enrollingFace && (
+                    <button
+                      type="button"
+                      onClick={() => void openFaceCamera()}
+                      className="h-9 px-3.5 rounded-full glass-pill text-xs font-medium text-[var(--text-primary)] hover:bg-white/[0.12] flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Camera className="h-3.5 w-3.5 text-violet-400" />
+                      <span>
+                        {identityCore.faceProfile?.enrolled
+                          ? 'Re-Enroll Face'
+                          : 'Enroll Face Profile'}
+                      </span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* 3. Last-Left Context Card */}
+        <section className="rounded-2xl p-3.5 glass-card flex items-start gap-3">
+          <span className="h-9 w-9 rounded-xl bg-white/[0.06] border border-white/[0.1] flex items-center justify-center text-[var(--accent)] shrink-0 mt-0.5">
+            <Clock className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
+                Last-Left Context · {sessionState.lastLeftTopic}
+              </h2>
+              <span className="text-[10px] font-mono-tabular text-[var(--text-muted)] shrink-0">
+                {sessionState.totalArchivedTurns} turns
+              </span>
+            </div>
+            <p className="text-[11px] text-[var(--text-muted)] leading-relaxed line-clamp-2 mt-0.5">
+              {sessionState.lastSummary}
+            </p>
+          </div>
+        </section>
+      </div>
+
+      {/* 4. Saved Memories List */}
+      <section className="space-y-2.5">
+        <div className="flex items-center justify-between px-1">
+          <h2 className="text-xs font-semibold text-[var(--text-secondary)]">Saved Memories</h2>
+          <span className="text-[11px] font-mono-tabular text-[var(--text-muted)]">
+            {filteredMemories.length} {filteredMemories.length === 1 ? 'fact' : 'facts'}
+          </span>
         </div>
-      )}
+
+        {filteredMemories.length === 0 ? (
+          <div className="rounded-2xl p-7 text-center glass-card">
+            <p className="text-sm font-medium text-[var(--text-primary)]">No matching memories</p>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              Add a fact below or tell Gwen &ldquo;Remember that...&rdquo; during a voice chat.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            {filteredMemories.map((item) => {
+              const isEditing = editingId === item.id;
+              const dateStr = new Date(item.updatedAt).toLocaleDateString([], {
+                month: 'short',
+                day: 'numeric',
+              });
+              const dotColor = CATEGORY_DOT_COLORS[item.category] || '#22d3ee';
+
+              return (
+                <article
+                  key={item.id}
+                  className="rounded-2xl p-3.5 glass-card flex flex-col justify-between gap-2.5 transition-colors hover:bg-white/[0.075]"
+                >
+                  {isEditing ? (
+                    <div className="space-y-2.5">
+                      <textarea
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                        rows={2}
+                        className="w-full rounded-xl p-2.5 text-xs sm:text-[13px] bg-white/[0.06] text-[var(--text-primary)] border border-white/[0.11] focus:outline-none focus:border-cyan-400/45"
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <select
+                          value={editCategory}
+                          onChange={(e) => setEditCategory(e.target.value as MemoryCategory)}
+                          className="h-8 rounded-full px-3 text-xs bg-white/[0.06] text-[var(--text-primary)] border border-white/[0.1]"
+                        >
+                          {CATEGORIES.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setEditingId(null)}
+                            className="h-8 w-8 rounded-full glass-pill flex items-center justify-center text-[var(--text-secondary)] cursor-pointer"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={commitEdit}
+                            className="h-8 px-3 rounded-full cta-aurora text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            <span>Save</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-[13px] leading-relaxed text-[var(--text-primary)]">
+                        {item.content}
+                      </p>
+
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/[0.07]">
+                        <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-1.5 truncate">
+                          <span
+                            className="h-2 w-2 rounded-full shrink-0"
+                            style={{ backgroundColor: dotColor }}
+                          />
+                          <span className="text-[var(--text-secondary)] font-medium truncate">
+                            {CATEGORY_CHIP_LABELS[item.category] || item.category}
+                          </span>
+                          {item.isPermanent && (
+                            <span className="text-[var(--accent)] font-medium">· Permanent</span>
+                          )}
+                          <span className="font-mono-tabular">· {dateStr}</span>
+                        </div>
+
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => beginEdit(item)}
+                            aria-label="Edit memory"
+                            className="h-7 w-7 rounded-full flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-white/[0.08] cursor-pointer"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onUpdateMemory(item.id, {
+                                isPermanent: !item.isPermanent,
+                                pinned: !item.isPermanent,
+                              })
+                            }
+                            aria-label={item.isPermanent ? 'Unpin permanent memory' : 'Pin as permanent'}
+                            className={`h-7 w-7 rounded-full flex items-center justify-center hover:bg-white/[0.08] transition-colors cursor-pointer ${
+                              item.isPermanent || item.pinned
+                                ? 'text-[var(--accent)]'
+                                : 'text-[var(--text-muted)]'
+                            }`}
+                          >
+                            {item.isPermanent || item.pinned ? (
+                              <PinOff className="h-3.5 w-3.5" />
+                            ) : (
+                              <Pin className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteMemory(item.id)}
+                            aria-label="Delete memory"
+                            className="h-7 w-7 rounded-full flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-white/[0.08] cursor-pointer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* Inline Add-Memory Box: Describe something to remember... + Permanent 🔒 & Gradient Save pills */}
+      <form onSubmit={handleAdd} className="rounded-2xl p-3.5 glass-card space-y-2.5">
+        <textarea
+          value={newContent}
+          onChange={(e) => setNewContent(e.target.value)}
+          rows={2}
+          placeholder="Describe something to remember..."
+          className="w-full rounded-xl px-3.5 py-2.5 text-xs sm:text-[13px] bg-white/[0.05] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] border border-white/[0.09] focus:outline-none focus:border-cyan-400/45 resize-none"
+        />
+
+        <div className="flex items-center justify-between gap-2">
+          <select
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value as MemoryCategory)}
+            aria-label="Memory category"
+            className="flex-1 min-w-0 h-9 rounded-full px-3 text-xs bg-white/[0.06] text-[var(--text-primary)] border border-white/[0.1] focus:outline-none focus:border-cyan-400/45 cursor-pointer"
+          >
+            {CATEGORIES.map((cat) => (
+              <option key={cat} value={cat}>
+                {CATEGORY_CHIP_LABELS[cat]}
+              </option>
+            ))}
+          </select>
+
+          <button
+            type="button"
+            onClick={() => setNewPermanent((p) => !p)}
+            className={`h-9 px-3 rounded-full text-xs font-medium flex items-center justify-center gap-1.5 border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              newPermanent
+                ? 'bg-cyan-400/14 border-cyan-400/35 text-[var(--accent)]'
+                : 'glass-pill text-[var(--text-secondary)]'
+            }`}
+          >
+            <span>Permanent</span>
+            <Lock className="h-3 w-3" />
+          </button>
+
+          <button
+            type="submit"
+            disabled={!newContent.trim()}
+            className="h-9 px-4 rounded-full cta-aurora text-xs font-semibold flex items-center justify-center transition-all disabled:opacity-40 whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            Save
+          </button>
+        </div>
+      </form>
     </div>
   );
 };
