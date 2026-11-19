@@ -1,0 +1,6 @@
+{
+  "name": "Gwen",
+  "description": "1-on-1 AI Voice Companion, Screen-Aware Assistant, and Hands-Free Controller created and developed by Syed Farhan.",
+  "requestFramePermissions": ["microphone", "camera", "display-capture"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
