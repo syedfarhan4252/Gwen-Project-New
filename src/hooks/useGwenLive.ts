@@ -216,6 +216,8 @@ export function useGwenLive({
   const [voiceTransportMode, setVoiceTransportMode] = useState<VoiceTransportMode>('live');
   const [activeLiveModel, setActiveLiveModel] = useState<string | null>(null);
   const [liveDiagnostics, setLiveDiagnostics] = useState<string | null>(null);
+  const [isMicTesting, setIsMicTesting] = useState(false);
+  const [micTestTranscript, setMicTestTranscript] = useState('');
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isPttPressed, setIsPttPressed] = useState(false);
 
@@ -258,6 +260,8 @@ export function useGwenLive({
   // Standard Voice Fallback Mode refs
   const fallbackActiveRef = useRef<boolean>(false);
   const fallbackBusyRef = useRef<boolean>(false);
+  const isMicTestingRef = useRef<boolean>(false);
+  const micTestTimeoutRef = useRef<number | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const recognitionRestartTimerRef = useRef<number | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -596,6 +600,13 @@ export function useGwenLive({
   const teardownStandardFallback = useCallback(() => {
     fallbackActiveRef.current = false;
     fallbackBusyRef.current = false;
+    isMicTestingRef.current = false;
+    setIsMicTesting(false);
+    setMicTestTranscript('');
+    if (micTestTimeoutRef.current) {
+      window.clearTimeout(micTestTimeoutRef.current);
+      micTestTimeoutRef.current = null;
+    }
     if (recognitionRestartTimerRef.current) {
       window.clearTimeout(recognitionRestartTimerRef.current);
       recognitionRestartTimerRef.current = null;
@@ -784,7 +795,7 @@ export function useGwenLive({
 
   // Automatic Standard Voice Fallback Mode: SpeechRecognition (or MediaRecorder -> /api/gwen/transcribe) -> generateContent -> speechSynthesis + 3D lip-sync
   const activateStandardVoiceFallback = useCallback(
-    async (liveFailureReason: string) => {
+    async (liveFailureReason: string, closeCode?: number) => {
       if (userInitiatedStopRef.current) return;
 
       // Close broken WebSocket cleanly without killing the mic stream
@@ -805,15 +816,21 @@ export function useGwenLive({
 
       fallbackActiveRef.current = true;
       setVoiceTransportMode('standard-fallback');
-      setActiveLiveModel('Standard Voice Fallback');
+      setActiveLiveModel('Standard Voice Mode');
       setLiveDiagnostics(liveFailureReason);
       setIsConnected(true);
       setGwenState('listening');
 
-      // Show exact Live WS error reason AND inform user seamlessly switched to Standard Voice Mode
-      const notice = `${liveFailureReason} — Switched automatically to Standard Voice Mode.`;
-      setError(notice);
-      callbacksRef.current.onVoiceNotice?.(notice);
+      // On code 1006 (proxy/host blocked), keep the UI calm: no red error banner, only the green/teal Standard Voice Mode bar
+      const isProxyBlocked1006 =
+        closeCode === 1006 || /\bcode\s*1006\b/i.test(liveFailureReason);
+      if (isProxyBlocked1006) {
+        setError(null);
+      } else {
+        const notice = `${liveFailureReason} — Switched automatically to Standard Voice Mode.`;
+        setError(notice);
+        callbacksRef.current.onVoiceNotice?.(notice);
+      }
 
       // Ensure microphone stream is active for visual meter + MediaRecorder fallback
       if (!micStreamRef.current) {
@@ -966,6 +983,13 @@ export function useGwenLive({
               }
             }
             const combined = (finalTranscript + interim).trim();
+            if (isMicTestingRef.current) {
+              if (combined) {
+                setMicTestTranscript(combined);
+                setLiveDraftInput(combined);
+              }
+              return;
+            }
             if (combined) setLiveDraftInput(combined);
             if (finalTranscript.trim()) {
               const toSend = finalTranscript.trim();
@@ -1068,6 +1092,14 @@ export function useGwenLive({
                 return;
               }
               const spoken = (data.transcript || '').trim();
+              if (isMicTestingRef.current) {
+                if (spoken) {
+                  setMicTestTranscript(spoken);
+                  setLiveDraftInput(spoken);
+                }
+                scheduleRecognitionStart();
+                return;
+              }
               if (spoken) {
                 await processSpokenTurn(spoken);
               } else {
@@ -1123,6 +1155,39 @@ export function useGwenLive({
     },
     [speakFallbackWithLipSync, stopSession, teardownLiveAudioGraph, teardownStandardFallback]
   );
+
+  // Quick interactive Mic Test in Standard Voice Mode to verify live speech-to-text immediately
+  const toggleMicTest = useCallback(() => {
+    if (!fallbackActiveRef.current) return;
+    if (isMicTestingRef.current) {
+      isMicTestingRef.current = false;
+      setIsMicTesting(false);
+      setLiveDraftInput('');
+      if (micTestTimeoutRef.current) {
+        window.clearTimeout(micTestTimeoutRef.current);
+        micTestTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    stopPlaybackQueue();
+    isMicTestingRef.current = true;
+    setIsMicTesting(true);
+    setMicTestTranscript('');
+    setLiveDraftInput('');
+    setGwenState('listening');
+
+    // Auto-finish Mic Test after 12 seconds and seamlessly return to normal Gwen voice turns
+    if (micTestTimeoutRef.current) {
+      window.clearTimeout(micTestTimeoutRef.current);
+    }
+    micTestTimeoutRef.current = window.setTimeout(() => {
+      isMicTestingRef.current = false;
+      setIsMicTesting(false);
+      setLiveDraftInput('');
+      micTestTimeoutRef.current = null;
+    }, 12000);
+  }, [stopPlaybackQueue]);
 
   // Shared PCM chunk handler for both Inline Blob AudioWorklet and ScriptProcessor fallback
   const handleMicPcmChunk = useCallback((channelData: Float32Array) => {
@@ -1277,8 +1342,8 @@ export function useGwenLive({
     setVoiceTransportMode('live');
     setGwenState('connecting');
 
-    // Read the latest personal Gemini API key dynamically from localStorage / Settings
-    const latestApiKey = getActiveGeminiApiKey();
+    // Read & trim the latest personal Gemini API key dynamically from localStorage / Settings
+    const latestApiKey = (getActiveGeminiApiKey() ?? '').trim();
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -1322,10 +1387,11 @@ export function useGwenLive({
       wsRef.current = ws;
 
       ws.onopen = () => {
+        const trimmedKey = (latestApiKey || getActiveGeminiApiKey() || '').trim();
         ws.send(
           JSON.stringify({
             type: 'init',
-            apiKey: latestApiKey || getActiveGeminiApiKey() || undefined,
+            apiKey: trimmedKey || undefined,
             voiceName: settingsRef.current.voiceName,
             persona: activePersona,
             languageMode: settingsRef.current.languageMode,
@@ -1436,7 +1502,7 @@ export function useGwenLive({
               setGwenState('error');
               setIsConnected(false);
             } else {
-              void activateStandardVoiceFallback(fullErr);
+              void activateStandardVoiceFallback(fullErr, msg.code);
             }
           } else if (msg.type === 'closed') {
             const code = typeof msg.code === 'number' ? msg.code : 1000;
@@ -1448,7 +1514,7 @@ export function useGwenLive({
               code !== 1000
             ) {
               const detail = describeWsClose(code, reason);
-              void activateStandardVoiceFallback(detail);
+              void activateStandardVoiceFallback(detail, code);
             } else if (!fallbackActiveRef.current) {
               setIsConnected(false);
               setGwenState((prev) =>
@@ -1479,9 +1545,9 @@ export function useGwenLive({
           setGwenState((prev) => (prev === 'error' || prev === 'dormant' ? prev : 'idle'));
           return;
         }
-        // Surface exact close.code & close.reason AND auto-switch to Standard Voice Fallback Mode!
+        // Surface exact close.code & close.reason (silently switching to calm Standard Voice Mode on code 1006)
         const exactClose = describeWsClose(closeEvent.code, closeEvent.reason);
-        void activateStandardVoiceFallback(exactClose);
+        void activateStandardVoiceFallback(exactClose, closeEvent.code);
       };
     } catch (err) {
       const errName = err instanceof Error ? err.name : 'UnknownError';
@@ -1782,6 +1848,9 @@ export function useGwenLive({
     voiceTransportMode,
     activeLiveModel,
     liveDiagnostics,
+    isMicTesting,
+    micTestTranscript,
+    toggleMicTest,
     isMicMuted,
     setIsMicMuted,
     isPttPressed,

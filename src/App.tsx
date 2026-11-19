@@ -2630,6 +2630,8 @@ export default function App() {
             isConnected={live.isConnected}
             voiceTransportMode={live.voiceTransportMode}
             activeLiveModel={live.activeLiveModel}
+            isMicTesting={live.isMicTesting}
+            micTestTranscript={live.micTestTranscript}
             isMicMuted={live.isMicMuted}
             isPttPressed={live.isPttPressed}
             isScreenSharing={live.isScreenSharing}
@@ -2654,6 +2656,7 @@ export default function App() {
             onDismissError={() => live.setError(null)}
             onOpenApiKeySettings={handleOpenApiKeySettings}
             onRetryLiveVoice={() => void live.retryLiveSession()}
+            onToggleMicTest={live.toggleMicTest}
             onStartVoice={handleStartVoiceGuarded}
             onStopVoice={live.stopSession}
             onSleepGwen={() =>

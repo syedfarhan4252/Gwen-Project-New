@@ -104,7 +104,8 @@ export function getActiveGeminiApiKey(): string | null {
     const bridge = getNativeBridge();
     if (bridge?.getSecureKey) {
       const nativeVal = bridge.getSecureKey(KEY_STORAGE_SLOT);
-      if (nativeVal?.trim()) return decodeKeyEnvelope(nativeVal) || nativeVal.trim();
+      const trimmedNative = (nativeVal ? decodeKeyEnvelope(nativeVal) || nativeVal : '').trim();
+      if (trimmedNative) return trimmedNative;
     }
   } catch {
     // Fall back to web localStorage
@@ -113,7 +114,8 @@ export function getActiveGeminiApiKey(): string | null {
   try {
     const raw = localStorage.getItem(KEY_STORAGE_SLOT);
     if (!raw) return null;
-    return decodeKeyEnvelope(raw);
+    const decoded = decodeKeyEnvelope(raw);
+    return decoded ? decoded.trim() || null : null;
   } catch {
     return null;
   }
@@ -227,7 +229,7 @@ export function clearStoredGeminiApiKey(): StoredApiKeyState {
 export function getGeminiRequestHeaders(
   extra: Record<string, string> = {}
 ): Record<string, string> {
-  const key = getActiveGeminiApiKey();
+  const key = (getActiveGeminiApiKey() ?? '').trim();
   if (!key) return { ...extra };
   return {
     ...extra,

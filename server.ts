@@ -35,14 +35,14 @@ const ALLOWED_VOICES = new Set<VoiceName>(['Zephyr', 'Kore', 'Puck', 'Charon', '
 
 function getAiClient(overrideApiKey?: string | null): GoogleGenAI {
   const userKey = typeof overrideApiKey === 'string' ? overrideApiKey.trim() : '';
-  const apiKey = userKey || process.env.GEMINI_API_KEY;
+  const apiKey = (userKey || process.env.GEMINI_API_KEY || '').trim();
   if (!apiKey) {
     throw new Error(
       'GEMINI_API_KEY_MISSING: No Gemini API key is configured. Add your free Google AI Studio key in Settings → Gemini API Key.'
     );
   }
   return new GoogleGenAI({
-    apiKey,
+    apiKey: apiKey.trim(),
     apiVersion: 'v1beta',
     httpOptions: {
       headers: {
@@ -2380,10 +2380,10 @@ User message: "${rawText}"`;
           closeLiveSession();
           isClosing = false;
 
-          const resolvedKey =
+          const resolvedKey = (
             (typeof msg.apiKey === 'string' ? msg.apiKey.trim() : '') ||
-            process.env.GEMINI_API_KEY ||
-            '';
+            (process.env.GEMINI_API_KEY || '').trim()
+          ).trim();
           if (!resolvedKey) {
             sendToClient({
               type: 'error',
@@ -2397,9 +2397,9 @@ User message: "${rawText}"`;
             return;
           }
 
-          // Always instantiate a fresh GoogleGenAI client dynamically using the active user key
+          // Always instantiate a fresh GoogleGenAI client dynamically using the trimmed active user key
           const ai = new GoogleGenAI({
-            apiKey: resolvedKey,
+            apiKey: resolvedKey.trim(),
             apiVersion: 'v1beta',
             httpOptions: {
               headers: {

@@ -87,6 +87,8 @@ interface CompanionViewProps {
   isConnected: boolean;
   voiceTransportMode?: 'live' | 'standard-fallback';
   activeLiveModel?: string | null;
+  isMicTesting?: boolean;
+  micTestTranscript?: string;
   isMicMuted: boolean;
   isPttPressed: boolean;
   isScreenSharing: boolean;
@@ -111,6 +113,7 @@ interface CompanionViewProps {
   onDismissError: () => void;
   onOpenApiKeySettings?: () => void;
   onRetryLiveVoice?: () => void;
+  onToggleMicTest?: () => void;
   onStartVoice: () => void;
   onStopVoice: () => void;
   onSleepGwen: () => void;
@@ -185,6 +188,8 @@ export const CompanionView: React.FC<CompanionViewProps> = ({
   isConnected,
   voiceTransportMode = 'live',
   activeLiveModel,
+  isMicTesting = false,
+  micTestTranscript = '',
   isMicMuted,
   isPttPressed,
   isScreenSharing,
@@ -209,6 +214,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({
   onDismissError,
   onOpenApiKeySettings,
   onRetryLiveVoice,
+  onToggleMicTest,
   onStartVoice,
   onStopVoice,
   onSleepGwen,
@@ -491,40 +497,116 @@ export const CompanionView: React.FC<CompanionViewProps> = ({
       {isConnected && voiceTransportMode === 'standard-fallback' && (
         <div
           role="status"
-          className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-2xl px-4 py-3 text-xs border"
+          className="mb-4 rounded-2xl px-4 py-3 text-xs border space-y-2.5"
           style={{
-            backgroundColor: 'var(--accent-soft)',
-            borderColor: 'var(--accent-ring)',
+            backgroundColor: 'rgba(16, 185, 129, 0.11)',
+            borderColor: 'rgba(20, 184, 166, 0.42)',
             color: 'var(--text-primary)',
           }}
         >
-          <div className="min-w-0">
-            <p className="font-semibold text-[var(--text-primary)]">
-              Standard Voice Mode Active (Seamless Fallback)
-            </p>
-            <p className="text-[var(--text-secondary)] mt-0.5">
-              Speak naturally — Gwen is listening via Speech Recognition → Gemini → Spoken Voice with 3D lip-sync
-              {activeLiveModel ? ` (${activeLiveModel})` : ''}.
-            </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <span
+                className="mt-1 h-2.5 w-2.5 rounded-full shrink-0 animate-pulse"
+                style={{ backgroundColor: '#14b8a6' }}
+                aria-hidden="true"
+              />
+              <div className="min-w-0">
+                <p className="font-semibold text-[var(--text-primary)]">
+                  Standard Voice Mode Active
+                </p>
+                <p className="text-[var(--text-secondary)] mt-0.5">
+                  Speak naturally — live speech-to-text, Gemini replies &amp; 3D avatar lip-sync are ready
+                  {activeLiveModel && activeLiveModel !== 'Standard Voice Mode'
+                    ? ` (${activeLiveModel})`
+                    : ''}.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {onToggleMicTest && (
+                <button
+                  type="button"
+                  onClick={onToggleMicTest}
+                  className="min-h-[34px] px-3 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap"
+                  style={{
+                    backgroundColor: isMicTesting
+                      ? '#0d9488'
+                      : 'rgba(20, 184, 166, 0.16)',
+                    borderColor: 'rgba(20, 184, 166, 0.45)',
+                    color: isMicTesting ? '#ffffff' : 'var(--text-primary)',
+                  }}
+                >
+                  <Mic className="h-3.5 w-3.5" />
+                  <span>{isMicTesting ? 'Stop Mic Test' : 'Mic Test'}</span>
+                </button>
+              )}
+              {onRetryLiveVoice && (
+                <button
+                  type="button"
+                  onClick={onRetryLiveVoice}
+                  className="min-h-[34px] px-3 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap"
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    borderColor: 'rgba(20, 184, 166, 0.35)',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <RefreshCw className="h-3.5 w-3.5 text-teal-400" />
+                  <span>Retry Live WS</span>
+                </button>
+              )}
+            </div>
           </div>
-          {onRetryLiveVoice && (
-            <button
-              type="button"
-              onClick={onRetryLiveVoice}
-              className="min-h-[34px] px-3 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 cursor-pointer whitespace-nowrap"
+
+          {(isMicTesting || micTestTranscript) && (
+            <div
+              className="rounded-xl px-3 py-2 border flex flex-col sm:flex-row sm:items-center justify-between gap-2"
               style={{
-                backgroundColor: 'var(--accent)',
-                color: 'var(--accent-contrast)',
+                backgroundColor: 'var(--bg-surface)',
+                borderColor: 'rgba(20, 184, 166, 0.32)',
               }}
             >
-              <RefreshCw className="h-3.5 w-3.5" />
-              <span>Retry Live WS</span>
-            </button>
+              <div className="min-w-0 flex-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-teal-400">
+                  {isMicTesting ? 'Live Mic Test · Speech-to-Text' : 'Last Mic Test Result'}
+                </span>
+                <p className="text-xs sm:text-sm text-[var(--text-primary)] mt-0.5 break-words">
+                  {micTestTranscript
+                    ? `“${micTestTranscript}”`
+                    : isMicTesting
+                      ? 'Listening… say anything to verify your microphone transcript right now.'
+                      : ''}
+                </p>
+              </div>
+              {isMicTesting && (
+                <div className="flex items-center gap-1.5 shrink-0" aria-label="Live microphone input level">
+                  <div className="w-20 h-2 rounded-full bg-black/20 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-75"
+                      style={{
+                        width: `${Math.max(8, Math.min(100, Math.round(audioLevel * 100)))}%`,
+                        backgroundColor: '#14b8a6',
+                      }}
+                    />
+                  </div>
+                  <span className="font-mono-tabular text-[11px] text-teal-400">
+                    {Math.round(audioLevel * 100)}%
+                  </span>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
 
-      {error && (
+      {error &&
+        !(
+          isConnected &&
+          voiceTransportMode === 'standard-fallback' &&
+          /\bcode\s*1006\b/i.test(error)
+        ) && (
         <div
           role="alert"
           className="mb-4 flex items-start justify-between gap-3 rounded-2xl px-4 py-3 text-sm border"
