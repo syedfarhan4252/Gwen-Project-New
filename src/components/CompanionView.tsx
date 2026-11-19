@@ -85,6 +85,8 @@ interface CompanionViewProps {
   personas: Persona[];
   gwenState: GwenState;
   isConnected: boolean;
+  voiceTransportMode?: 'live' | 'standard-fallback';
+  activeLiveModel?: string | null;
   isMicMuted: boolean;
   isPttPressed: boolean;
   isScreenSharing: boolean;
@@ -108,6 +110,7 @@ interface CompanionViewProps {
   error: string | null;
   onDismissError: () => void;
   onOpenApiKeySettings?: () => void;
+  onRetryLiveVoice?: () => void;
   onStartVoice: () => void;
   onStopVoice: () => void;
   onSleepGwen: () => void;
@@ -180,6 +183,8 @@ export const CompanionView: React.FC<CompanionViewProps> = ({
   personas,
   gwenState,
   isConnected,
+  voiceTransportMode = 'live',
+  activeLiveModel,
   isMicMuted,
   isPttPressed,
   isScreenSharing,
@@ -203,6 +208,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({
   error,
   onDismissError,
   onOpenApiKeySettings,
+  onRetryLiveVoice,
   onStartVoice,
   onStopVoice,
   onSleepGwen,
@@ -482,6 +488,42 @@ export const CompanionView: React.FC<CompanionViewProps> = ({
         </div>
       )}
 
+      {isConnected && voiceTransportMode === 'standard-fallback' && (
+        <div
+          role="status"
+          className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-2xl px-4 py-3 text-xs border"
+          style={{
+            backgroundColor: 'var(--accent-soft)',
+            borderColor: 'var(--accent-ring)',
+            color: 'var(--text-primary)',
+          }}
+        >
+          <div className="min-w-0">
+            <p className="font-semibold text-[var(--text-primary)]">
+              Standard Voice Mode Active (Seamless Fallback)
+            </p>
+            <p className="text-[var(--text-secondary)] mt-0.5">
+              Speak naturally — Gwen is listening via Speech Recognition → Gemini → Spoken Voice with 3D lip-sync
+              {activeLiveModel ? ` (${activeLiveModel})` : ''}.
+            </p>
+          </div>
+          {onRetryLiveVoice && (
+            <button
+              type="button"
+              onClick={onRetryLiveVoice}
+              className="min-h-[34px] px-3 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 cursor-pointer whitespace-nowrap"
+              style={{
+                backgroundColor: 'var(--accent)',
+                color: 'var(--accent-contrast)',
+              }}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Retry Live WS</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {error && (
         <div
           role="alert"
@@ -493,22 +535,35 @@ export const CompanionView: React.FC<CompanionViewProps> = ({
           }}
         >
           <div className="space-y-2 min-w-0">
-            <p className="leading-relaxed">{error}</p>
-            {onOpenApiKeySettings &&
-              /api\s*key|quota|rate limit|invalid|expired|401|403|429/i.test(error) && (
-                <button
-                  type="button"
-                  onClick={onOpenApiKeySettings}
-                  className="min-h-[34px] px-3 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--accent)',
-                    color: 'var(--accent-contrast)',
-                  }}
-                >
-                  <KeyRound className="h-3.5 w-3.5" />
-                  <span>Update API Key in Settings</span>
-                </button>
-              )}
+            <p className="leading-relaxed font-mono-tabular text-xs sm:text-sm break-words">{error}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {onOpenApiKeySettings &&
+                /api\s*key|quota|rate limit|invalid|expired|401|403|429/i.test(error) && (
+                  <button
+                    type="button"
+                    onClick={onOpenApiKeySettings}
+                    className="min-h-[34px] px-3 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                    style={{
+                      backgroundColor: 'var(--accent)',
+                      color: 'var(--accent-contrast)',
+                    }}
+                  >
+                    <KeyRound className="h-3.5 w-3.5" />
+                    <span>Update API Key in Settings</span>
+                  </button>
+                )}
+              {onRetryLiveVoice &&
+                /websocket|closed|code\s+\d+|live voice/i.test(error) && (
+                  <button
+                    type="button"
+                    onClick={onRetryLiveVoice}
+                    className="min-h-[34px] px-3 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 bg-[var(--bg-surface)] border border-[var(--border-hairline)] text-[var(--text-primary)] cursor-pointer"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span>Retry Live Voice</span>
+                  </button>
+                )}
+            </div>
           </div>
           <button
             type="button"

@@ -152,6 +152,9 @@ export default function App() {
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
   const mainScrollRef = useRef<HTMLDivElement | null>(null);
   const speakReplyRef = useRef<(text: string) => Promise<void>>(async () => {});
+  const fallbackSpeechTurnRef = useRef<(spokenText: string) => Promise<string | null>>(
+    async () => null
+  );
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -1876,6 +1879,8 @@ export default function App() {
     onApiKeyError: (errorCode, message) => {
       handleGeminiApiError(errorCode === 'QUOTA_EXCEEDED' ? 429 : 403, errorCode, message);
     },
+    onFallbackSpeechTurn: (spokenText) => fallbackSpeechTurnRef.current(spokenText),
+    onVoiceNotice: (message) => showToast(message),
   });
 
   const handleStartVoiceGuarded = useCallback(() => {
@@ -1988,8 +1993,8 @@ export default function App() {
         return;
       }
 
-      // If Live Voice session is connected and user sends text, route directly into Live session!
-      if (live.isConnected) {
+      // If Live Voice WebSocket session is connected and user sends text, route directly into Live session!
+      if (live.isConnected && live.voiceTransportMode === 'live') {
         store.appendMessage({
           role: 'user',
           mode: 'live',
@@ -2164,6 +2169,120 @@ export default function App() {
       store,
     ]
   );
+
+  // Automatic Standard Voice Fallback turn: SpeechRecognition/MediaRecorder -> generateContent -> speechSynthesis + 3D lip-sync
+  fallbackSpeechTurnRef.current = async (spokenText: string): Promise<string | null> => {
+    const text = spokenText.trim();
+    if (!text) return null;
+
+    const screenFrame = live.getLatestScreenFrame();
+    const cameraFrame = live.getLatestCameraFrame();
+
+    store.appendMessage({
+      role: 'user',
+      mode: 'live',
+      text,
+      hasScreenContext: Boolean(screenFrame),
+      hasCameraContext: Boolean(cameraFrame),
+    });
+
+    // Check Hands-Free commands in Standard Voice Mode too
+    if (store.settings.handsFreeControlEnabled) {
+      try {
+        const parseRes = await fetch('/api/gwen/parse-command', {
+          method: 'POST',
+          headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            utterance: text,
+            personaNames: store.personas.map((p) => p.name),
+          }),
+        });
+        if (parseRes.ok) {
+          const parsed = (await parseRes.json()) as ParsedCommandResult;
+          if (
+            parsed.isCommand &&
+            parsed.action !== 'none' &&
+            parsed.action !== 'summarize_screen' &&
+            parsed.action !== 'translate_screen'
+          ) {
+            if (parsed.action === 'sleep_gwen') {
+              const bye =
+                parsed.confirmationText ||
+                'Going to sleep now. Tap Wake Gwen whenever you want to talk again.';
+              handleSleepGwen(bye, 1800);
+              return bye;
+            }
+            await executeDeviceAction(
+              parsed.action,
+              parsed.target,
+              parsed.payload,
+              parsed.value,
+              parsed.platform,
+              parsed.aspectRatio,
+              parsed.style
+            );
+            const confirmMsg = parsed.confirmationText || 'Done!';
+            store.appendMessage({ role: 'gwen', mode: 'command', text: confirmMsg });
+            return confirmMsg;
+          }
+        }
+      } catch {
+        // Fall through to normal Gemini chat
+      }
+    }
+
+    const historyPayload = store.transcript
+      .filter((m) => m.role === 'user' || m.role === 'gwen')
+      .slice(-14)
+      .map((m) => ({
+        role: m.role as 'user' | 'gwen',
+        text: m.text,
+      }));
+
+    const res = await fetch('/api/gwen/chat', {
+      method: 'POST',
+      headers: getGeminiRequestHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        message: text,
+        history: historyPayload,
+        persona: store.activePersona,
+        languageMode: store.settings.languageMode,
+        memories: store.settings.incognitoMode ? [] : store.memories,
+        identityCore: store.settings.incognitoMode ? undefined : store.identityCore,
+        deviceUserName: store.settings.deviceUserName,
+        timezone: store.settings.timezone,
+        weather: store.weather,
+        careState: store.careState,
+        sessionState: store.settings.incognitoMode ? undefined : store.sessionState,
+        googleAccountEmail: store.googleAccount?.email || null,
+        activeKidStudy: store.activeKidBundle,
+        allKidNames: store.kidBundles.map((b) => b.profile.name),
+        proactiveEmpathyEnabled: store.settings.proactiveEmpathyEnabled,
+        incognitoMode: store.settings.incognitoMode,
+        model: store.settings.textModel,
+        screenFrameBase64: screenFrame || undefined,
+        cameraFrameBase64: cameraFrame || undefined,
+        faceRecognized: live.faceRecognized,
+        voiceRecognized: live.voiceRecognized,
+      }),
+    });
+
+    const data = (await res.json()) as { text?: string; error?: string; errorCode?: string };
+    if (!res.ok) {
+      handleGeminiApiError(res.status, data.errorCode, data.error);
+      throw new Error(data.error || `Gemini chat returned HTTP ${res.status}`);
+    }
+
+    const replyText =
+      data.text?.trim() || 'I heard you — could you try asking that once more?';
+    store.appendMessage({
+      role: 'gwen',
+      mode: 'live',
+      text: replyText,
+    });
+    void runAutoMemoryExtraction(text, replyText);
+    return replyText;
+  };
 
   const handleRunShortcut = useCallback(
     async (shortcut: CustomShortcut) => {
@@ -2509,6 +2628,8 @@ export default function App() {
             personas={store.personas}
             gwenState={live.gwenState}
             isConnected={live.isConnected}
+            voiceTransportMode={live.voiceTransportMode}
+            activeLiveModel={live.activeLiveModel}
             isMicMuted={live.isMicMuted}
             isPttPressed={live.isPttPressed}
             isScreenSharing={live.isScreenSharing}
@@ -2532,6 +2653,7 @@ export default function App() {
             error={live.error}
             onDismissError={() => live.setError(null)}
             onOpenApiKeySettings={handleOpenApiKeySettings}
+            onRetryLiveVoice={() => void live.retryLiveSession()}
             onStartVoice={handleStartVoiceGuarded}
             onStopVoice={live.stopSession}
             onSleepGwen={() =>

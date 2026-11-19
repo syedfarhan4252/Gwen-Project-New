@@ -150,45 +150,147 @@ function getFriendlyApiError(err: unknown): {
   };
 }
 
+function isModelNotFound(err: unknown): boolean {
+  const raw = extractRawErrorMessage(err);
+  return (
+    raw.includes('404') ||
+    raw.includes('NOT_FOUND') ||
+    raw.toLowerCase().includes('is not found for api version') ||
+    raw.toLowerCase().includes('not supported for')
+  );
+}
+
+interface DiscoveredModelsCache {
+  bidiModels: string[];
+  expiresAt: number;
+}
+
+const bidiModelCache = new Map<string, DiscoveredModelsCache>();
+
+const PREFERRED_LIVE_MODELS = [
+  'gemini-3.8-live',
+  'gemini-2.5-flash-native-audio-preview-12-2025',
+  'gemini-2.5-flash-native-audio-preview-09-2025',
+  'gemini-2.5-flash-native-audio-latest',
+];
+
+function isDeprecatedModelName(modelId: string): boolean {
+  const lower = modelId.toLowerCase();
+  return (
+    lower.includes('gemini-1.5') ||
+    lower.includes('gemini-1.0') ||
+    lower.includes('gemini-2.0') ||
+    lower === 'gemini-pro'
+  );
+}
+
+async function discoverBidiModels(apiKey: string): Promise<string[]> {
+  const cacheKey = `${apiKey.slice(0, 8)}:${apiKey.slice(-6)}:${apiKey.length}`;
+  const cached = bidiModelCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.bidiModels;
+  }
+
+  const discovered: string[] = [];
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=100`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const json = (await res.json()) as {
+        models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
+      };
+      for (const m of json.models ?? []) {
+        const methods = m.supportedGenerationMethods ?? [];
+        if (!methods.includes('bidiGenerateContent')) continue;
+        const cleanName = (m.name || '').replace(/^models\//, '').trim();
+        if (!cleanName || isDeprecatedModelName(cleanName)) continue;
+        discovered.push(cleanName);
+      }
+    }
+  } catch {
+    // Non-fatal: fall through to curated candidate list
+  }
+
+  // Order: discovered preferred models first, then other discovered bidi models, then curated fallbacks
+  const ordered: string[] = [];
+  const pushUnique = (id: string) => {
+    if (id && !ordered.includes(id) && !isDeprecatedModelName(id)) {
+      ordered.push(id);
+    }
+  };
+
+  for (const pref of PREFERRED_LIVE_MODELS) {
+    if (discovered.includes(pref)) pushUnique(pref);
+  }
+  for (const d of discovered) {
+    if (d.includes('native-audio') || d.includes('live')) pushUnique(d);
+  }
+  for (const d of discovered) {
+    pushUnique(d);
+  }
+  for (const pref of PREFERRED_LIVE_MODELS) {
+    pushUnique(pref);
+  }
+
+  bidiModelCache.set(cacheKey, {
+    bidiModels: ordered,
+    expiresAt: Date.now() + 5 * 60 * 1000,
+  });
+
+  return ordered;
+}
+
 async function generateWithFallback(
   ai: GoogleGenAI,
   primaryModel: string,
   params: Omit<Parameters<GoogleGenAI['models']['generateContent']>[0], 'model'>
 ) {
-  try {
-    const response = await ai.models.generateContent({
-      model: primaryModel,
-      ...params,
-    });
-    return { response, usedModel: primaryModel };
-  } catch (err) {
-    if (isTransientHighDemand(err) || isQuotaExhausted(err)) {
-      const fallbackModel = primaryModel !== 'gemini-3.1-flash-lite' ? 'gemini-3.1-flash-lite' : 'gemini-4-hydrogen';
-      const fallbackConfig = params.config
-        ? { ...params.config, thinkingConfig: undefined }
-        : undefined;
-      try {
+  const fallbackConfig = params.config
+    ? { ...params.config, thinkingConfig: undefined }
+    : undefined;
+  const candidateModels = Array.from(
+    new Set([
+      primaryModel,
+      primaryModel !== 'gemini-3.1-flash-lite' ? 'gemini-3.1-flash-lite' : 'gemini-4-hydrogen',
+      'gemini-2.5-flash',
+    ])
+  );
+
+  let lastErr: unknown;
+  for (let i = 0; i < candidateModels.length; i++) {
+    const model = candidateModels[i];
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        ...params,
+        config: i === 0 ? params.config : fallbackConfig,
+      });
+      return { response, usedModel: model };
+    } catch (err) {
+      lastErr = err;
+      const canRetryNext =
+        isTransientHighDemand(err) || isQuotaExhausted(err) || isModelNotFound(err);
+      if (!canRetryNext) {
+        throw err;
+      }
+      if (isTransientHighDemand(err) && i === candidateModels.length - 1) {
+        await new Promise((r) => setTimeout(r, 850));
         const response = await ai.models.generateContent({
-          model: fallbackModel,
+          model,
           ...params,
           config: fallbackConfig,
         });
-        return { response, usedModel: fallbackModel };
-      } catch (err2) {
-        if (isTransientHighDemand(err2)) {
-          await new Promise((r) => setTimeout(r, 900));
-          const response = await ai.models.generateContent({
-            model: 'gemini-3.1-flash-lite',
-            ...params,
-            config: fallbackConfig,
-          });
-          return { response, usedModel: 'gemini-3.1-flash-lite' };
-        }
-        throw err2;
+        return { response, usedModel: model };
       }
     }
-    throw err;
   }
+  throw lastErr;
 }
 
 const LIVE_FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
@@ -735,8 +837,7 @@ async function startServer() {
     const start = Date.now();
     try {
       const ai = getRequestAiClient(req);
-      await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
+      await generateWithFallback(ai, 'gemini-3.1-flash-lite', {
         contents: 'Respond with OK.',
       });
       const latencyMs = Date.now() - start;
@@ -985,6 +1086,39 @@ async function startServer() {
       }
 
       res.json({ audioBase64, mimeType: 'audio/wav' });
+    } catch (err) {
+      const { status, errorCode, message } = getFriendlyApiError(err);
+      res.status(status).json({ error: message, errorCode });
+    }
+  });
+
+  // Audio Transcription endpoint (used by Standard Voice Fallback Mode when SpeechRecognition is unavailable)
+  app.post('/api/gwen/transcribe', async (req, res) => {
+    try {
+      const ai = getRequestAiClient(req);
+      const { audioBase64, mimeType = 'audio/webm', languageHint } = req.body as {
+        audioBase64?: string;
+        mimeType?: string;
+        languageHint?: string;
+      };
+      if (!audioBase64) {
+        res.status(400).json({ error: 'Audio data is required for transcription.' });
+        return;
+      }
+      const cleaned = audioBase64.replace(/^data:audio\/[^;]+;base64,/, '');
+      const prompt = languageHint
+        ? `Transcribe the user's speech accurately (likely ${languageHint}). Return ONLY the exact spoken words, with no labels or commentary. If silent or unintelligible, return an empty string.`
+        : 'Transcribe the user speech accurately. Return ONLY the exact spoken words, with no labels or commentary. If silent or unintelligible, return an empty string.';
+
+      const { response } = await generateWithFallback(ai, 'gemini-3.5-transcribe', {
+        contents: {
+          parts: [
+            { inlineData: { mimeType, data: cleaned } },
+            { text: prompt },
+          ],
+        },
+      });
+      res.json({ transcript: (response.text ?? '').trim() });
     } catch (err) {
       const { status, errorCode, message } = getFriendlyApiError(err);
       res.status(status).json({ error: message, errorCode });
@@ -2246,7 +2380,34 @@ User message: "${rawText}"`;
           closeLiveSession();
           isClosing = false;
 
-          const ai = getAiClient(msg.apiKey);
+          const resolvedKey =
+            (typeof msg.apiKey === 'string' ? msg.apiKey.trim() : '') ||
+            process.env.GEMINI_API_KEY ||
+            '';
+          if (!resolvedKey) {
+            sendToClient({
+              type: 'error',
+              code: 4001,
+              reason: 'API key missing',
+              errorCode: 'INVALID_KEY',
+              fallbackRecommended: false,
+              message:
+                'No Gemini API key configured. Open Settings → Gemini API Key to add your personal Google AI Studio key.',
+            });
+            return;
+          }
+
+          // Always instantiate a fresh GoogleGenAI client dynamically using the active user key
+          const ai = new GoogleGenAI({
+            apiKey: resolvedKey,
+            apiVersion: 'v1beta',
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build',
+              },
+            },
+          });
+
           const voiceName: VoiceName =
             msg.voiceName && ALLOWED_VOICES.has(msg.voiceName) ? msg.voiceName : 'Zephyr';
 
@@ -2281,9 +2442,23 @@ User message: "${rawText}"`;
             voiceRecognized: Boolean(msg.voiceRecognized),
           });
 
-          let sentReady = false;
-          liveSession = await ai.live.connect({
-            model: 'gemini-3.8-live',
+          const candidateModels = await discoverBidiModels(resolvedKey);
+
+          interface LiveAttemptSpec {
+            model: string;
+            label: string;
+            toolsEnabled: boolean;
+            config: Record<string, unknown>;
+          }
+
+          const attempts: LiveAttemptSpec[] = [];
+          const primaryLiveModel = candidateModels[0] || 'gemini-3.8-live';
+
+          // Attempt 1: Primary discovered bidi model with full audio + transcription + tools
+          attempts.push({
+            model: primaryLiveModel,
+            label: 'full',
+            toolsEnabled: true,
             config: {
               responseModalities: [Modality.AUDIO],
               speechConfig: {
@@ -2296,80 +2471,275 @@ User message: "${rawText}"`;
               outputAudioTranscription: {},
               tools: [{ functionDeclarations: LIVE_FUNCTION_DECLARATIONS }],
             },
-            callbacks: {
-              onopen: () => {
-                if (!sentReady) {
-                  sentReady = true;
-                  sendToClient({ type: 'ready' });
-                }
-              },
-              onmessage: (liveMsg: LiveServerMessage) => {
-                const sc = liveMsg.serverContent;
-                if (sc?.interrupted) {
-                  sendToClient({ type: 'interrupted' });
-                }
-                if (sc?.inputTranscription?.text) {
-                  sendToClient({
-                    type: 'input_transcript',
-                    text: sc.inputTranscription.text,
-                  });
-                }
-                if (sc?.outputTranscription?.text) {
-                  sendToClient({
-                    type: 'output_transcript',
-                    text: sc.outputTranscription.text,
-                  });
-                }
-                for (const part of sc?.modelTurn?.parts ?? []) {
-                  if (part.inlineData?.data) {
-                    sendToClient({
-                      type: 'audio',
-                      data: part.inlineData.data,
-                    });
-                  }
-                }
-                if (sc?.turnComplete) {
-                  sendToClient({ type: 'turn_complete' });
-                }
-                if (liveMsg.toolCall?.functionCalls?.length) {
-                  const calls = liveMsg.toolCall.functionCalls.map((call) => ({
-                    id: call.id,
-                    name: call.name,
-                    args: call.args ?? {},
-                  }));
-                  sendToClient({ type: 'tool_call', calls });
+          });
 
-                  if (liveSession) {
-                    liveSession.sendToolResponse({
-                      functionResponses: calls.map((c) => ({
-                        id: c.id,
-                        name: c.name,
-                        response: {
-                          ok: true,
-                          status:
-                            c.name === 'composeMessage'
-                              ? 'draft_queued_awaiting_user_confirmation'
-                              : 'executed_on_device',
-                        },
-                      })),
-                    });
-                  }
-                }
+          // Attempt 2: Same primary model with minimal valid setup (no tools) in case tools trigger 1007/1008
+          attempts.push({
+            model: primaryLiveModel,
+            label: 'minimal-no-tools',
+            toolsEnabled: false,
+            config: {
+              responseModalities: [Modality.AUDIO],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName },
+                },
               },
-              onerror: (e: unknown) => {
-                const { message, errorCode } = getFriendlyApiError(e);
-                sendToClient({ type: 'error', message, errorCode });
-              },
-              onclose: () => {
-                sendToClient({ type: 'closed' });
-              },
+              systemInstruction,
             },
           });
 
-          if (!sentReady) {
-            sentReady = true;
-            sendToClient({ type: 'ready' });
+          // Subsequent attempts: Alternate discovered bidiGenerateContent models with minimal valid setup
+          for (const altModel of candidateModels.slice(1, 4)) {
+            attempts.push({
+              model: altModel,
+              label: 'fallback-model-minimal',
+              toolsEnabled: false,
+              config: {
+                responseModalities: [Modality.AUDIO],
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: { voiceName },
+                  },
+                },
+                systemInstruction,
+              },
+            });
           }
+
+          const tryConnectAttempt = (
+            spec: LiveAttemptSpec
+          ): Promise<{
+            session: Awaited<ReturnType<GoogleGenAI['live']['connect']>>;
+            model: string;
+            toolsEnabled: boolean;
+          }> => {
+            return new Promise((resolve, reject) => {
+              let settled = false;
+              let handshakeTimer: ReturnType<typeof setTimeout> | null = null;
+              let sessionRef: Awaited<ReturnType<GoogleGenAI['live']['connect']>> | null = null;
+
+              const finishReady = () => {
+                if (settled || !sessionRef) return;
+                settled = true;
+                if (handshakeTimer) clearTimeout(handshakeTimer);
+                resolve({
+                  session: sessionRef,
+                  model: spec.model,
+                  toolsEnabled: spec.toolsEnabled,
+                });
+              };
+
+              const failHandshake = (code: number, reason: string) => {
+                if (settled) return;
+                settled = true;
+                if (handshakeTimer) clearTimeout(handshakeTimer);
+                try {
+                  sessionRef?.close();
+                } catch {
+                  // Ignore close race
+                }
+                reject({ code, reason, model: spec.model, label: spec.label });
+              };
+
+              ai.live
+                .connect({
+                  model: spec.model,
+                  config: spec.config as Parameters<GoogleGenAI['live']['connect']>[0]['config'],
+                  callbacks: {
+                    onopen: () => {
+                      // Wait briefly for setupComplete or early 1007/1008 close before marking ready
+                      handshakeTimer = setTimeout(() => {
+                        finishReady();
+                      }, 650);
+                    },
+                    onmessage: (liveMsg: LiveServerMessage) => {
+                      const rawMsg = liveMsg as LiveServerMessage & { setupComplete?: unknown };
+                      if (rawMsg.setupComplete) {
+                        finishReady();
+                      }
+                      const sc = liveMsg.serverContent;
+                      if (sc?.interrupted) {
+                        sendToClient({ type: 'interrupted' });
+                      }
+                      if (sc?.inputTranscription?.text) {
+                        sendToClient({
+                          type: 'input_transcript',
+                          text: sc.inputTranscription.text,
+                        });
+                      }
+                      if (sc?.outputTranscription?.text) {
+                        sendToClient({
+                          type: 'output_transcript',
+                          text: sc.outputTranscription.text,
+                        });
+                      }
+                      for (const part of sc?.modelTurn?.parts ?? []) {
+                        if (part.inlineData?.data) {
+                          sendToClient({
+                            type: 'audio',
+                            data: part.inlineData.data,
+                          });
+                        }
+                      }
+                      if (sc?.turnComplete) {
+                        sendToClient({ type: 'turn_complete' });
+                      }
+                      if (liveMsg.toolCall?.functionCalls?.length) {
+                        const calls = liveMsg.toolCall.functionCalls.map((call) => ({
+                          id: call.id,
+                          name: call.name,
+                          args: call.args ?? {},
+                        }));
+                        sendToClient({ type: 'tool_call', calls });
+
+                        if (liveSession) {
+                          liveSession.sendToolResponse({
+                            functionResponses: calls.map((c) => ({
+                              id: c.id,
+                              name: c.name,
+                              response: {
+                                ok: true,
+                                status:
+                                  c.name === 'composeMessage'
+                                    ? 'draft_queued_awaiting_user_confirmation'
+                                    : 'executed_on_device',
+                              },
+                            })),
+                          });
+                        }
+                      }
+                    },
+                    onerror: (e: unknown) => {
+                      const raw = extractRawErrorMessage(e);
+                      if (!settled) {
+                        failHandshake(1006, raw || 'Upstream Gemini Live error');
+                        return;
+                      }
+                      const { message, errorCode } = getFriendlyApiError(e);
+                      sendToClient({
+                        type: 'error',
+                        code: 1006,
+                        reason: raw,
+                        message: `${message}${raw && !message.includes(raw) ? ` (${raw})` : ''}`,
+                        errorCode,
+                        model: spec.model,
+                        fallbackRecommended: errorCode !== 'INVALID_KEY',
+                      });
+                    },
+                    onclose: (closeEvt?: unknown) => {
+                      const ev = (closeEvt || {}) as {
+                        code?: number;
+                        reason?: string;
+                        wasClean?: boolean;
+                      };
+                      const code = typeof ev.code === 'number' ? ev.code : 1006;
+                      const reason = typeof ev.reason === 'string' ? ev.reason : '';
+
+                      if (!settled) {
+                        failHandshake(code, reason || `Closed with code ${code}`);
+                        return;
+                      }
+
+                      if (!isClosing && code !== 1000) {
+                        const friendly = getFriendlyApiError(reason || `Code ${code}`);
+                        sendToClient({
+                          type: 'error',
+                          code,
+                          reason,
+                          model: spec.model,
+                          errorCode: friendly.errorCode,
+                          fallbackRecommended: friendly.errorCode !== 'INVALID_KEY',
+                          message: `Gemini Live closed (code ${code}${reason ? `: ${reason}` : ''}) on ${spec.model}.`,
+                        });
+                      }
+                      sendToClient({
+                        type: 'closed',
+                        code,
+                        reason,
+                        wasClean: Boolean(ev.wasClean),
+                        model: spec.model,
+                      });
+                    },
+                  },
+                })
+                .then((sess) => {
+                  sessionRef = sess;
+                  if (settled) {
+                    try {
+                      sess.close();
+                    } catch {
+                      // ignore
+                    }
+                  }
+                })
+                .catch((err) => {
+                  const raw = extractRawErrorMessage(err);
+                  failHandshake(1006, raw);
+                });
+            });
+          };
+
+          let lastFailure: { code: number; reason: string; model: string; label: string } | null =
+            null;
+
+          for (const attempt of attempts) {
+            if (clientWs.readyState !== WebSocket.OPEN) return;
+            try {
+              const connected = await tryConnectAttempt(attempt);
+              liveSession = connected.session;
+              sendToClient({
+                type: 'ready',
+                model: connected.model,
+                toolsEnabled: connected.toolsEnabled,
+              });
+              return;
+            } catch (failObj) {
+              const fail = failObj as {
+                code?: number;
+                reason?: string;
+                model?: string;
+                label?: string;
+              };
+              const code = typeof fail.code === 'number' ? fail.code : 1006;
+              const reason = fail.reason || extractRawErrorMessage(failObj);
+              lastFailure = {
+                code,
+                reason,
+                model: fail.model || attempt.model,
+                label: fail.label || attempt.label,
+              };
+              console.warn(
+                `[Gwen Live] Attempt (${attempt.model} / ${attempt.label}) closed: code=${code} reason=${reason}`
+              );
+
+              // Do not keep retrying if the API key itself is invalid/unauthorized
+              const lowerReason = reason.toLowerCase();
+              if (
+                lowerReason.includes('api key not valid') ||
+                lowerReason.includes('api_key_invalid') ||
+                lowerReason.includes('permission_denied') ||
+                lowerReason.includes('unauthenticated')
+              ) {
+                break;
+              }
+            }
+          }
+
+          const finalCode = lastFailure?.code ?? 1006;
+          const finalReason = lastFailure?.reason || 'Upstream Live handshake closed';
+          const finalModel = lastFailure?.model || primaryLiveModel;
+          const { errorCode } = getFriendlyApiError(finalReason);
+
+          sendToClient({
+            type: 'error',
+            code: finalCode,
+            reason: finalReason,
+            model: finalModel,
+            errorCode,
+            fallbackRecommended: errorCode !== 'INVALID_KEY',
+            message: `Live Voice WebSocket failed (code ${finalCode}${finalReason ? `: ${finalReason}` : ''}) on ${finalModel}.`,
+          });
           return;
         }
 
@@ -2395,8 +2765,16 @@ User message: "${rawText}"`;
           closeLiveSession();
         }
       } catch (err) {
+        const raw = extractRawErrorMessage(err);
         const { message, errorCode } = getFriendlyApiError(err);
-        sendToClient({ type: 'error', message, errorCode });
+        sendToClient({
+          type: 'error',
+          code: 1011,
+          reason: raw,
+          message: `${message}${raw && !message.includes(raw) ? ` (${raw})` : ''}`,
+          errorCode,
+          fallbackRecommended: errorCode !== 'INVALID_KEY',
+        });
       }
     });
 
